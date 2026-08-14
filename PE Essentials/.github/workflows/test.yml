@@ -1,0 +1,20 @@
+name: PE Essentials tests
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Run the harness
+        run: node test/run.js
+      - name: Bundles must match module sources
+        run: |
+          node make-bundle.js
+          git diff --exit-code -- "PE Essentials - Library.js" "PE Essentials x IS - Library.js" \
+            || (echo "::error::Stale bundle — run 'node make-bundle.js' and commit the result" && exit 1)

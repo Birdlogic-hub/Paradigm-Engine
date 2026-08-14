@@ -1,0 +1,457 @@
+// ===== GateKit v0.8.3 =====
+// v0.8.3 — the OBSERVATORY SEAM (proposal veto ruling 2, 8/12/2026):
+//  GK_lastCheck() widens with `dialect` (skillFirst|bare|difficultyFirst|
+//  legacy) and `raw` (the verdict line as the model wrote it, 160 cap) —
+//  additive, no consumer breaks. The bare dialect now NAMES itself (it
+//  reported skillFirst since v0.8.1; same group layout, so parsing is
+//  unchanged — only the label). ObserverKit is the first consumer.
+// v0.8.2 — GK_isCommandTurn(), the read half of the bookkeeping stamp
+//  (EventKit build, 7/21): extensions could MARK a turn non-adjudicable
+//  but not ASK about one — TrackerKit's drift deviation documented the
+//  gap ("public-seam contract forbids reading GK's command stamp").
+//  Now they ask, not peek. One getter, no behavior change.
+// v0.8.1 — the BARE dialect (live-found 7/16, minutes into v0.8.0):
+//  'Survival; trivial; success; resource=none;' — the model kept the field
+//  ORDER sacred and shed every label, and the line walked through both the
+//  parser and the near-miss net (which looks for labels) into the story.
+//  Fix: parse the bare positional dialect (same group layout as skill-
+//  first), and widen the near-miss detector to know 'resource'.
+// v0.8.0 — the COST (first schema event; owner directive 7/16): the verdict
+//  line grows one optional trailing field, resource=none|name -n|name +n.
+//  BIDIRECTIONAL: the model reports meaningful spends (-) AND restores (+)
+//  of resources named in its notes — /use item efficacy rides this channel
+//  (InventoryKit consumes deterministically; the ruling says what it did).
+//  Static field, closed vocabulary (the enabled resource names) — the same
+//  class as skill=, NOT the rejected per-scenario dynamic deltas. GateKit
+//  stores {resource, resourceDelta} raw; TrackerKit clamps (25%/turn cap)
+//  and applies. Optional + trailing = fully backward compatible.
+// v0.7.2 — the DIE, stage one (owner's call, 7/16): luck is an EXPLICIT d20.
+//  The d20 is the most conventionalized random number in the training data;
+//  naming it borrows the DM's outcome mapping outright (2 misses, 19
+//  crushes) where a d100 percentile maps to nothing. Luck Min/Max leave the
+//  config card — a configurable die would destroy the convention that makes
+//  this work — but the INTERNAL bounds survive below as the private seam the
+//  future spine rides (roll a narrowed range while stating a d20). Verdict
+//  schema untouched; crit thresholds deferred (v0.8 candidate c). Old
+//  adventures' config cards keep stale Luck Min/Max lines — unread, harmless.
+// v0.7.1 — the NOTE seam: GK_setArbiterNote(owner, line). Extensions hand
+//  the arbiter one line each (data, not functions); GateKit renders every
+//  note inside its EXISTING block, after the luck line — zero extra context
+//  blocks, which is the whole point (SkillKit proposal §3: one arbiter
+//  voice, not two tail blocks). Capped 160 chars/owner; set "" to clear.
+//  First consumer: SkillKit (the Skill).
+// script by bottledfox
+//
+// Paradigm Engine primitive: THE CHECK.
+// Code cannot judge story consistency; the model can. So: pose one question
+// about the player's action in the strongest context position, receive one
+// machine-readable ruling in-band, and expose it as engine state for other
+// primitives to consume.
+//
+// LINEAGE (all changes playtest-driven; full history in ROADMAP):
+//   v0.4.x — schema-migrating state; delivery-first Recent-Story trimming vs
+//     maxChars; non-adjudicable command turns; semantic do/say/story guard;
+//     difficulty-first verdict schema (premise before conclusion); =/: delimiter
+//     tolerance; impossible=>fail backstop; near-miss telemetry ("prompt
+//     strictly, parse generously"). LIVE-PROVEN 7/13/2026.
+//   v0.5.x — "GateKit Config" card via ParaCard (SC_config); /check parsing via
+//     RegexLib (RX_command). First Core consumer.
+//   v0.6.0 — /check REMOVED (the config card superseded it; its live failure
+//     found RegexLib v0.1.1's normalizer bug on the way out). The Enabled
+//     switch is now LIVE: read from the config card every turn — edit the card
+//     mid-game to toggle the checker. NEW SEAM: GK_markCommandTurn() lets any
+//     module (Inventory's /undo, /inventory, ...) stamp the current turn as
+//     pure bookkeeping so the arbiter skips it. Echo channel removed with its
+//     only user.
+//   v0.6.1 — posts each turn's ruling to the "Event Log" card
+//     (ParaCard's SC_report — the engine's player-facing event log). Live
+//     Report switch in the config card.
+//
+// WIRING:
+//   Input tab:    text = GK_onInput(text);       // per-action luck roll
+//   Context tab:  text = GK_onContext(text);     // LAST, after other passes
+//   Output tab:   text = GK_onOutput(text);      // FIRST, before other passes
+//                 text = GK_onOutputDebug(text); // optional, while playtesting
+//
+// SEAMS (for other modules):
+//   GK_lastCheck()        → {result, difficulty, skill, luck, turn} | null
+//   GK_setLuck(n)         → supply/bend this action's luck (clamped to range)
+//   GK_markCommandTurn()  → stamp this turn non-adjudicable (bookkeeping)
+//   GK_isCommandTurn()    → is this turn stamped? (v0.8.2 — ask, don't peek)
+//   GK_setArbiterNote(owner, line) → one rendered line in the arbiter block (160 cap)
+// ---------------------------------------------------------------------------
+
+// Defaults. With ParaCard present these seed the editable "GateKit Config"
+// card and back-fill any line the player deletes or mangles.
+const GK_SETTINGS = {
+    ENABLED: true,              // the checker; LIVE — card edits apply next action
+    REPORT: true,               // post rulings to the "Event Log" card (needs ParaCard)
+    SHOW_TOAST: false,          // state.message — NOT implemented on Phoenix UI
+    DEBUG_CONSOLE: true,        // mirror GK activity to the editor's CONSOLE LOG
+    DEBUG_FOOTER: false         // GK_onOutputDebug appends a visible footer (playtesting)
+};
+
+// The die (v0.7.2): FIXED d20, stated to the model by name. Private bounds —
+// not config — because the convention is the mechanism. The future spine
+// narrows GK_DIE_ROLL_MAX while the prompt keeps saying d20 (loaded dice).
+const GK_DIE_MIN = 1;
+const GK_DIE_MAX = 20;          // stated die size (never change casually)
+const GK_DIE_ROLL_MAX = 20;     // actual roll ceiling (the spine seam)
+
+function GK_rollDie() {
+    return GK_DIE_MIN + Math.floor(Math.random() * (GK_DIE_ROLL_MAX - GK_DIE_MIN + 1));
+}
+
+// The arbiter block. {{LUCK}} substituted at context time.
+const GK_PROMPT = [
+    "<SYSTEM>",
+    "You are the silent arbiter of player actions. Before narrating, decide the outcome of the player's most recent action based on story consistency and luck.",
+    "luck={{LUCK}} (a d20 roll)",
+    "Read the luck roll as a dungeon master reads a d20: 1 is the worst possible luck, 20 the best. Luck does not apply to impossible or trivial actions.",
+    "First output EXACTLY one line — name the skill involved, THEN judge its difficulty, THEN the check, THEN any resource spent or restored:",
+    "skill=name; difficulty=trivial|minor|major|impossible; check=success|partial|fail; resource=none|name -amount|name +amount;",
+    "Rules: impossible always fails. Trivial always succeeds. Luck sways only minor and major attempts. Use skill=none when no particular skill applies. resource: report a meaningful spend (-) or restore (+) of a resource listed in your notes (e.g. resource=stamina -6, or resource=health +10 when something heals you); otherwise resource=none.",
+    "Then continue the story, honoring the verdict.",
+    "</SYSTEM>"
+].join("\n");
+
+// Load canary: appears in Console Log / Script Test logs on EVERY hook run.
+// If you don't see this line, the Library isn't attached, saved, or executing.
+try {
+    if (GK_cfg().DEBUG_CONSOLE) log("[GateKit] library loaded (v0.8.1)");
+} catch (e) {}
+
+// Verdict line emitted by the model (v0.7.0 skill-first schema: the model
+// names the skill, then reasons difficulty, then concludes the check —
+// premise before conclusion, now including WHICH premise).
+// Delimiters =/: and separators ;/, accepted — prompt strictly, parse generously.
+const GK_VERDICT_RX = /^\s*skill\s*[=:]\s*([^;\n]+?)\s*[;,]\s*difficulty\s*[=:]\s*(trivial|minor|major|impossible)\s*[;,]\s*check\s*[=:]\s*(success|partial|fail)\s*[;,]?(?:\s*resource\s*[=:]\s*([^;\n]+?)\s*[;,]?)?\s*$/im;
+
+// v0.8.1 — the BARE dialect (live-found): labels dropped, order kept.
+// "Survival; trivial; success; resource=none;" — same group layout as
+// skill-first, so it maps identically after matching.
+const GK_VERDICT_RX_BARE = /^\s*([a-z][a-z0-9 '\-]{0,40}?)\s*[;,]\s*(trivial|minor|major|impossible)\s*[;,]\s*(success|partial|fail)\s*[;,]?(?:\s*resource\s*[=:]\s*([^;\n]+?)\s*[;,]?)?\s*$/im;
+
+// v0.4–v0.6 order (difficulty-first, skill optional trailing), still accepted —
+// models echo old context, and skill-less rulings arrive in this shape.
+const GK_VERDICT_RX_DFIRST = /^\s*difficulty\s*[=:]\s*(trivial|minor|major|impossible)\s*[;,]\s*check\s*[=:]\s*(success|partial|fail)\s*[;,]?\s*(?:skill\s*[=:]\s*([^;\n]+?)\s*[;,]?\s*)?$/im;
+// Legacy order (check-first), still accepted — models sometimes echo old context.
+const GK_VERDICT_RX_LEGACY = /^\s*check\s*[=:]\s*(success|partial|fail)\s*[;,]\s*difficulty\s*[=:]\s*(trivial|minor|major|impossible)\s*[;,]?\s*(?:skill\s*[=:]\s*([^;\n]+?)\s*[;,]?\s*)?$/im;
+
+// --- Live settings ---------------------------------------------------------------
+// The editable "GateKit Config" card when ParaCard is present, built-in
+// defaults otherwise. Cached per hook execution (the Library re-runs before
+// each hook, so the cache naturally refreshes every pass).
+let GK_CFG_CACHE = null;
+function GK_cfg() {
+    if (GK_CFG_CACHE) return GK_CFG_CACHE;
+    let cfg;
+    if (typeof SC_config === "function") {
+        try {
+            cfg = SC_config("GateKit Config", GK_SETTINGS, {
+                description: "Settings for GateKit (the silent checker). Edit values in the entry; "
+                    + "changes apply on your next action. Deleted or invalid lines fall "
+                    + "back to defaults. Enabled toggles the checker on/off."
+            });
+        } catch (e) {
+            cfg = Object.assign({}, GK_SETTINGS);
+        }
+    } else {
+        cfg = Object.assign({}, GK_SETTINGS);
+    }
+    GK_CFG_CACHE = cfg;
+    return cfg;
+}
+
+// --- State (schema-migrating) --------------------------------------------------
+// Never trust the shape of persisted state: an adventure may carry a GK object
+// written by ANY earlier version. Backfill field-by-field; sweep dead fields.
+function GK_state() {
+    if (!state.vars || typeof state.vars !== "object") state.vars = {};
+    if (!state.vars.GK || typeof state.vars.GK !== "object") state.vars.GK = {};
+    const GK = state.vars.GK;
+    if (typeof GK.luck !== "number") GK.luck = null;
+    if (typeof GK.luckTurn !== "number") GK.luckTurn = -1;
+    if (typeof GK.commandTurn !== "number") GK.commandTurn = -1;
+    if (!Object.prototype.hasOwnProperty.call(GK, "lastCheck")) GK.lastCheck = null;
+    if (!Array.isArray(GK.log)) GK.log = [];
+    if (!GK.notes || typeof GK.notes !== "object") GK.notes = {};
+    for (const k in GK.notes) {
+        if (typeof GK.notes[k] !== "string" || GK.notes[k] === "") delete GK.notes[k];
+    }
+    delete GK.on;     // v0.5.x runtime toggle — superseded by live cfg.ENABLED
+    delete GK.echo;   // v0.5.x /check reply channel — removed with /check
+    return GK;
+}
+
+function GK_turn() {
+    return (info && typeof info.actionCount === "number") ? info.actionCount : -1;
+}
+
+function GK_log(msg) {
+    const GK = GK_state();
+    GK.log.push("[" + GK_turn() + "] " + msg);
+    if (GK.log.length > 20) GK.log.shift();
+    if (GK_cfg().DEBUG_CONSOLE) {
+        try { log("[GateKit " + GK_turn() + "] " + msg); } catch (e) {}
+    }
+}
+
+// --- Seams -----------------------------------------------------------------------
+// Latest ruling, for any module that wants to react to it.
+function GK_lastCheck() {
+    return GK_state().lastCheck;
+}
+
+// Another module may supply or bend this action's luck (clamped to range).
+// Call during the Input pass.
+function GK_setLuck(value) {
+    const GK = GK_state();
+    const n = Number(value);
+    if (!Number.isFinite(n)) return;
+    GK.luck = Math.max(GK_DIE_MIN, Math.min(GK_DIE_MAX, Math.round(n)));
+    GK.luckTurn = GK_turn();
+}
+
+// Stamp the current turn as pure bookkeeping (a swallowed slash command, a
+// meta action) so the arbiter skips it. Call from any module's Input pass.
+function GK_markCommandTurn() {
+    GK_state().commandTurn = GK_turn();
+}
+
+// v0.8.2: the read half of the stamp — extensions ask, never peek.
+function GK_isCommandTurn() {
+    return GK_state().commandTurn === GK_turn();
+}
+
+// v0.7.1 — the NOTE seam. An extension supplies ONE line the arbiter should
+// see (ranks, world state, gauges); GateKit renders all notes inside its
+// existing block, after the luck line. Notes persist until their owner
+// overwrites or clears them (line "" deletes). Data only; 160 chars/owner.
+function GK_setArbiterNote(owner, line) {
+    const GK = GK_state();
+    const key = String(owner == null ? "" : owner).trim();
+    if (key === "") return;
+    const s = String(line == null ? "" : line).replace(/\s+/g, " ").trim();
+    if (s === "") { delete GK.notes[key]; return; }
+    GK.notes[key] = s.slice(0, 160);
+}
+
+// --- Input: per-action luck roll ---------------------------------------------------
+function GK_onInput(text) {
+    const GK = GK_state();
+    // One luck roll per action; retries of the same action reuse it.
+    const turn = GK_turn();
+    if (GK.luckTurn !== turn) {
+        const cfg = GK_cfg();
+        GK.luckTurn = turn;
+        GK.luck = GK_rollDie();
+        // v0.6.2, doctrine rule 11: projections exist from Turn 1 — the
+        // Event Log materializes here, not on the first ruling post.
+        if (cfg.REPORT && cfg.ENABLED && typeof SC_reportEnsure === "function") SC_reportEnsure();
+    }
+    return String(text || "");
+}
+
+// --- Context: append the arbiter block at the strongest position ----------------
+function GK_onContext(text) {
+    const GK = GK_state();
+    let ctx = String(text || "");
+    const cfg = GK_cfg();
+    if (!cfg.ENABLED) return ctx;   // LIVE switch — the config card decides
+
+    // Bookkeeping turns aren't adjudicable (GK_markCommandTurn seam).
+    if (GK.commandTurn === GK_turn()) return ctx;
+
+    // Semantic guard: only real player actions get adjudicated. Starts,
+    // Continues, and see-turns are not player narrative actions.
+    try {
+        const last = history && history[history.length - 1];
+        if (!last || ["do", "say", "story"].indexOf(last.type) === -1) return ctx;
+    } catch (e) {}
+
+    // Roll here too in case no input pass ran this action (safety net).
+    const turn = GK_turn();
+    if (GK.luckTurn !== turn || GK.luck == null) {
+        GK.luckTurn = turn;
+        GK.luck = GK_rollDie();
+    }
+
+    let block = GK_PROMPT
+        .replace(/\{\{\s*LUCK\s*\}\}/gi, String(GK.luck));
+
+    // v0.7.1: extension notes ride the existing block, after the luck line —
+    // one arbiter voice, zero extra tail blocks (the note seam's contract).
+    const noteKeys = Object.keys(GK.notes || {}).sort();
+    if (noteKeys.length) {
+        block = block.replace(/^(luck=.*)$/m, "$1\n" + noteKeys.map(k => GK.notes[k]).join("\n"));
+    }
+
+    // Delivery-first capacity policy: the injection is the module's job.
+    const maxChars = (info && typeof info.maxChars === "number") ? info.maxChars : 0;
+    const overflow = maxChars > 0 ? (ctx.length + block.length + 2) - maxChars : 0;
+    if (overflow > 0) {
+        const trimmed = GK_trimRecentStory(ctx, overflow);
+        if (trimmed.length < ctx.length) {
+            ctx = trimmed;
+        } else {
+            GK_log("no Recent Story header; injecting with ~" + overflow + " char overflow");
+        }
+    }
+    return (ctx ? ctx + "\n\n" : "") + block;
+}
+
+// Remove ~n chars of the OLDEST sentences from the Recent Story portion.
+// Returns the original context unchanged if no header is found.
+function GK_trimRecentStory(ctx, n) {
+    const m = ctx.match(/^\s*Recent Story\s*:?\s*$/im);
+    if (!m || typeof m.index !== "number") return ctx;
+    const bodyStart = m.index + m[0].length;
+    const head = ctx.slice(0, bodyStart);
+    let body = ctx.slice(bodyStart);
+    let removed = 0;
+    while (removed < n) {
+        const cut = body.search(/[.!?…]\s+/);
+        if (cut === -1) break;
+        const sep = body.slice(cut).match(/^[.!?…]\s+/)[0].length;
+        removed += cut + sep;
+        body = body.slice(cut + sep);
+    }
+    GK_log("trimmed " + removed + " chars of oldest Recent Story to fit the arbiter block");
+    return head + "\n" + body.trimStart();
+}
+
+// --- Output: capture the ruling, hide the scaffolding ----------------------------
+let GK_DEBUG_RAW = null;   // raw model output, captured before any stripping
+
+function GK_onOutput(text) {
+    const GK = GK_state();
+    let out = String(text || "");
+    GK_DEBUG_RAW = out;
+
+    let m = out.match(GK_VERDICT_RX);            // v0.7 skill-first
+    let dialect = "skillFirst";
+    if (!m) { m = out.match(GK_VERDICT_RX_BARE); if (m) dialect = "bare"; }   // v0.8.1: skill-first group layout
+    if (!m) { m = out.match(GK_VERDICT_RX_DFIRST); dialect = "difficultyFirst"; }
+    if (!m) { m = out.match(GK_VERDICT_RX_LEGACY); dialect = "legacy"; }
+    if (!m) {
+        // Near-miss detector: an attempted verdict in a dialect we don't parse
+        // yet. Strip it anyway (scaffolding must never reach the player) and
+        // log it verbatim so each model rotation reports its own format.
+        const first = out.split("\n").find(l => l.trim()) || "";
+        if (first.length < 160
+            && /\b(difficulty|check|skill|resource)\s*[-=:]/i.test(first)
+            && /\b(trivial|minor|major|impossible|success|partial|fail)\b/i.test(first)) {
+            GK_log("UNPARSED verdict-like line (add to parser): \"" + first.trim() + "\"");
+            out = out.replace(first, "").replace(/\n{3,}/g, "\n\n").trim();
+        }
+    }
+    if (m) {
+        // Per-dialect group mapping: skillFirst/bare = s/d/c, difficultyFirst = d/c/s, legacy = c/d/s
+        const sfLayout = (dialect === "skillFirst" || dialect === "bare");   // bare shares the layout (v0.8.3)
+        let result = (sfLayout ? m[3] : dialect === "legacy" ? m[1] : m[2]).toLowerCase();
+        const difficulty = (sfLayout ? m[2] : dialect === "legacy" ? m[2] : m[1]).toLowerCase();
+        const rawSkill = sfLayout ? m[1] : m[3];
+        // Normalize non-skills to null ("none", "n/a", "-", "null", "nothing")
+        let skill = rawSkill ? rawSkill.trim().toLowerCase() : null;
+        if (skill && /^(none|n\/a|na|null|nothing|-+)$/.test(skill)) skill = null;
+        // Deterministic backstop for contradictory rulings (seen live: success/impossible)
+        if (difficulty === "impossible" && result !== "fail") {
+            GK_log("coerced contradictory ruling " + result + "/impossible -> fail/impossible");
+            result = "fail";
+        }
+        // v0.8.0 the Cost: optional bidirectional resource field (skill-first dialect)
+        let resource = null, resourceDelta = 0;
+        const rawRes = (sfLayout && m[4]) ? m[4].trim() : "";
+        if (rawRes !== "" && !/^(none|n\/a|na|null|-+)$/i.test(rawRes)) {
+            const rm = rawRes.match(/^([a-z][a-z0-9 '\-]*?)\s*([+-])\s*(\d+)$/i);
+            if (rm) {
+                resource = rm[1].trim().toLowerCase();
+                resourceDelta = parseInt(rm[3], 10) * (rm[2] === "-" ? -1 : 1);
+            } else {
+                GK_log("UNPARSED resource field (add to parser): \"" + rawRes + "\"");
+            }
+        }
+        GK.lastCheck = {
+            result: result,
+            difficulty: difficulty,
+            skill: skill,
+            resource: resource,
+            resourceDelta: resourceDelta,
+            luck: GK.luck,
+            dialect: dialect,                        // parse metadata (v0.8.3, the Observatory's seam)
+            raw: m[0].trim().slice(0, 160),          // the verdict line as the model wrote it
+            turn: GK_turn()
+        };
+        out = out.replace(m[0], "").replace(/\n{3,}/g, "\n\n").trim();
+        if (GK_cfg().SHOW_TOAST) {
+            state.message = "Check: " + GK.lastCheck.difficulty + "/" + GK.lastCheck.result;
+        }
+        GK_log("difficulty=" + GK.lastCheck.difficulty + " check=" + GK.lastCheck.result + " luck=" + GK.luck);
+    }
+
+    // Event Log — the player-facing event log (ParaCard's SC_report).
+    // Only on turns the arbiter was actually watching: enabled, player action,
+    // not stamped as bookkeeping.
+    try {
+        const cfg = GK_cfg();
+        if (cfg.REPORT && cfg.ENABLED && typeof SC_report === "function") {
+            const last = history && history[history.length - 1];
+            const playerTurn = last && ["do", "say", "story"].indexOf(last.type) !== -1;
+            if (GK.commandTurn === GK_turn()) {
+                SC_report("GateKit", "bookkeeping turn — not judged");
+            } else if (playerTurn && m) {
+                SC_report("GateKit", "ruling: " + GK.lastCheck.difficulty + " difficulty → "
+                    + GK.lastCheck.result
+                    + (GK.lastCheck.skill ? " (" + GK.lastCheck.skill + ")" : "")
+                    + (GK.lastCheck.resource ? " · " + GK.lastCheck.resource + " "
+                        + (GK.lastCheck.resourceDelta > 0 ? "+" : "") + GK.lastCheck.resourceDelta : "")
+                    + " · luck " + (GK.luck == null ? "-" : GK.luck));
+            } else if (playerTurn) {
+                SC_report("GateKit", "no ruling captured · luck " + (GK.luck == null ? "-" : GK.luck));
+            }
+        }
+    } catch (e) {}
+    return out;
+}
+
+// ============================ GK DEBUG SECTION =================================
+// Playtest instrumentation. Wire AFTER GK_onOutput in the Output tab.
+// Silence via the config card's Debug Footer / Debug Console switches, or
+// delete this fenced section (and its call) once trusted.
+// NOTE: the footer enters story history; use a throwaway test adventure.
+function GK_onOutputDebug(text) {
+    let out = String(text || "");
+    try {
+        const GK = GK_state();
+        const cfg = GK_cfg();
+        const turn = GK_turn();
+        const c = GK.lastCheck;
+        const hit = c && c.turn === turn;
+        const raw = (GK_DEBUG_RAW == null) ? "(GK_onOutput did not run?)" : GK_DEBUG_RAW;
+        const firstLine = (String(raw).split("\n").find(l => l.trim()) || "").slice(0, 100);
+        const summary = "checker: " + (cfg.ENABLED ? "ON" : "OFF")
+            + " | turn: " + turn
+            + " | luck: " + (GK.luck == null ? "-" : GK.luck)
+            + " | verdict this turn: " + (hit
+                ? c.difficulty + "/" + c.result + (c.skill ? "/" + c.skill : "")
+                : "NONE CAPTURED");
+        if (cfg.DEBUG_CONSOLE) {
+            try {
+                log("[GK DEBUG] " + summary);
+                log("[GK DEBUG] model's first line: \"" + firstLine + "\"");
+            } catch (e) {}
+        }
+        if (cfg.DEBUG_FOOTER) {
+            out += "\n\n----- GK DEBUG -----"
+                + "\n" + summary.split(" | ").join("\n")
+                + "\nmodel's first line: \"" + firstLine + "\""
+                + "\nlog: " + ((GK.log || []).slice(-3).join("  |  ") || "(empty)")
+                + "\n--------------------";
+        }
+    } catch (e) {
+        try { log("[GK DEBUG] error: " + e); } catch (e2) {}
+    }
+    return out;
+}
+// ========================== END GK DEBUG SECTION ===============================

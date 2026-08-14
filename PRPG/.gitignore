@@ -1,0 +1,4 @@
+# Local reference material — comb sources, not part of the shipped package.
+# Endless Backrooms is third-party source; FD_Library is the owner's prior art.
+# Ignored entirely so publishing this repo publishes nothing that isn't ours.
+example/
