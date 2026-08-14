@@ -9,6 +9,53 @@ One repo, two shippable packages — each is a single Library-tab paste plus thr
 
 Tests run from either package folder (`node test\run.js` in PE Essentials; `node test\<suite>.test.js` in PRPG) — one clone is everything. Regenerate bundles with each folder's `make-bundle.js`.
 
+## The `/` commands
+
+Everything the player can type, and what happens. Items and amounts are free text (`/take 3 torches` and `/take torches 3` both work); "judged" means the AI rules on the attempt like a DM — slash commands themselves are bookkeeping, but the consequences they cause can be adjudicated per your config card policies (`none` / `outcome` / `gated`).
+
+### Possessions — both packages
+
+| Command | What it does |
+|---|---|
+| `/take <item>` · `/take 2 tonic; dagger; rope` | Acquire — multi-item grabs are one judged turn, one ruling; a fail rolls back the whole grab |
+| `/collect <amount> <currency>` | Acquire into the Wallet (`/collect 50 gold`) — judged |
+| `/drop <item>` | Shed items — pure bookkeeping |
+| `/give <amount> <thing> to <someone>` | Expenditure, judged — expenditures never refund |
+| `/throw <item> at <target>` | Expenditure, judged — the throw is certain, the landing is the DM's call |
+| `/use <item>` | Consume one; the ruling decides what it did |
+| `/eat <item>` · `/drink <item>` | Consume one; the ruling prices the meal — how much it restores, or costs. Bare `/eat` refuses — no free lunches |
+| `/swap [amount] <name>` | Reclassify between items and Wallet, auto-direction; bare `/swap coins` moves all. Never judged |
+| `/undo` | Reverse the last ledger operation (composites reverse whole, 20 deep). For story regrets, just **Erase the turn** — the engine's state follows automatically |
+| `/inventory` · `/inv` | Echo your holdings |
+
+### Equipment — both packages
+
+| Command | What it does |
+|---|---|
+| `/equip <item> as <category>` | Equip into **weapon / armor / clothes / accessory / tool** (open lists, no caps) |
+| `/equip <category> <item>` · `/equip <item> <category>` | Same thing — no `as` needed, either order |
+| `/unequip <item>` | Off it comes |
+
+Don't have the item yet? `/equip rusty dagger as weapon` takes *and* equips it in one judged turn — a failed ruling rolls back both. Short names work (`/equip dagger` finds your held "rusty dagger"); genuine ambiguity asks instead of guessing. Anything you drop, give, throw, or eat auto-unequips.
+
+### Gauges and recovery — Paradigm RPG
+
+| Command | What it does |
+|---|---|
+| `/rest` | Deterministic breather: ~50% Stamina, ~25% Mana, ~10% Health |
+| `/sleep` | Full Stamina and Mana, ~25% Health |
+| `/meditate` | Judged — the ruling decides what the trance restores |
+| `/track <gauge> +N` · `/track <gauge> -N` | Manual gauge nudge (`/track health -10`), range-clamped, logged |
+
+### The world, the record — Paradigm RPG
+
+| Command | What it does |
+|---|---|
+| `/event [category]` | Force a random world event now (debug verb; requires `Report: true` on the Events Config) |
+| `/telemetry` | Echo the telemetry ring's status — how many rulings are recorded for the Observatory (requires `Report: true` on the Observer Config) |
+
+Skills have **no commands** — they grow from doing (every ruling tallies its skill; trivial and impossible teach nothing). Full detail, cards, and config reference: the [Paradigm RPG player's guide](PRPG/README.md).
+
 ---
 
 A modular engine within AID, built from shared primitives. Each module generalizes an **idea** proven somewhere in the old projects — never the old implementation itself. Legacy projects are source material (bones), not consumers: nothing here exists to retrofit them, and they stay frozen as-is.

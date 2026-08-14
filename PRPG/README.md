@@ -46,7 +46,7 @@ Items and amounts are free text: `/take 3 torches` and `/take torches 3` both wo
 | `/use <item>` | Consume one and let the ruling decide what it did (`/use red tonic`) | Yes (default `outcome`) |
 | `/eat <item>` · `/drink <item>` | Consume one; the ruling *prices the meal* — how much Hunger or Stamina it restores (or doesn't; eating something foul can cost you). Bare `/eat` refuses — no free lunches | Yes, always |
 | `/swap [amount] <name>` | Reclassify between items and Wallet (`/swap coins` moves all, `/swap 10 coins` partial, auto-direction). Meta — nothing happens in the fiction when coins change pockets | Never |
-| `/undo` | Reverse the last ledger operation (composites like a grab-and-equip reverse whole). Depth: 20 | Never |
+| `/undo` | Reverse the last ledger operation (composites like a grab-and-equip reverse whole). Depth: 20. Typo'd a command? `/undo`. Regret a whole turn? **Erase it** — the engine's state follows the story automatically, up to 5 turns back | Never |
 | `/inventory` · `/inv` | Echo your holdings | Never |
 
 ### Equipment (the Loadout)
@@ -85,6 +85,9 @@ Random intrusions — strangers, weather, discoveries, ambushes — fire on stor
 | Command | What happens |
 |---|---|
 | `/event [category]` | Debug verb: force an event now (optionally from one category). Requires `Report: true` on the Events Config |
+| `/telemetry` | Echo the telemetry ring's status — how many rulings ObserverKit has recorded, their turn span, and drops. Requires `Report: true` on the Observer Config |
+
+Erasing story turns is safe: the engine keeps short-term state snapshots and restores the matching one when you erase (up to 5 turns; deeper erases are reported on the Event Log rather than silently ignored).
 
 ### Skills and Level (SkillKit — no commands, all play)
 
