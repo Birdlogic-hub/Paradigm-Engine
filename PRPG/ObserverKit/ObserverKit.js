@@ -1,4 +1,13 @@
-// ===== ObserverKit v0.1.1 =====
+// ===== ObserverKit v0.1.2 =====
+// v0.1.2 — the WOUND FIELD (the Wound Reread's instrument, 8/13/2026):
+//  records carry `wnd` = {f: frame, t: tier, v: vetoed, s: span} from
+//  TK_lastWound(), so the parser's real false-positive and miss rates can be
+//  measured in play instead of estimated from invented sentences.
+//  BACKFILLED, deliberately: TrackerKit settles the wound LATER in the output
+//  chain than OB records (OB sits right after GateKit so `rank` is the rank
+//  HELD at attempt). Rather than move OB — or add a hook line the proposal
+//  ruled out of scope — the field is written onto the previous record at the
+//  next input pass. One turn of lag, invisible to a polling harvester.
 // v0.1.1 — the REPLAY STAMP (RewindKit's companion, 8/13/2026): OB is
 //  exempt from the Rewind's restores (telemetry about erased turns is
 //  data, not ghosts) — so records written for a turn BELOW the ring's
@@ -82,12 +91,29 @@ function OB_tag(label) {
 // Public seam — the ring as data (tests, in-adventure inspection).
 function OB_ring() { return OB_state().ring; }
 
+// TrackerKit's wound lands after our output pass — stamp it onto the record it
+// belongs to, next turn. Idempotent; silent when there is nothing to add.
+function OB_backfillWound() {
+    try {
+        if (typeof TK_lastWound !== "function") return;
+        const OB = OB_state();
+        if (!OB.ring.length) return;
+        const rec = OB.ring[OB.ring.length - 1];
+        if (!rec || rec.wnd) return;
+        const w = TK_lastWound();
+        if (!w || w.turn !== rec.t) return;
+        rec.wnd = { f: w.frame, t: w.tier, v: !!w.veto };
+        if (w.span) rec.wnd.s = String(w.span).slice(0, 48);
+    } catch (e) {}
+}
+
 function OB_onInput(text) {
     const t = String(text || "");
     try {
         const cfg = OB_cfg();
         if (!cfg.ENABLED) return t;
         OB_state();                                  // ring + card exist from Turn 1 (rule 11)
+        OB_backfillWound();                          // the previous turn's wound settles after we recorded it
         if (typeof RX_command === "function") {
             const cmd = RX_command(t, ["telemetry"]);
             if (cmd) {

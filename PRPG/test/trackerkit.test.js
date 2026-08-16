@@ -206,6 +206,56 @@ H.assert(state.vars.TK.trackers.health.val === 47, "multi-hit output: highest ti
 TK_onOutput("Shrapnel grazes your cheek as the spike impales your thigh.");
 H.assert(state.vars.TK.trackers.health.val === 47, "one wound per action (retry-guarded)");
 
+// --- v0.4.0 THE WOUND REREAD: the 8/13 probe corpus as a regression fixture ---------
+// Every line below is verbatim from the research probe (Documentation/Architecture/
+// Wound Parsing - Research Findings.md §5). Before the Reread, 12 of them were wrong.
+function wound(n, text) {                       // one settled turn, returns HP delta
+    const before = state.vars.TK.trackers.health.val;
+    plain(n); TK_onOutput(text);
+    return before - state.vars.TK.trackers.health.val;
+}
+function fullHeal(n) {
+    H.turn(n, "do"); H.resetCaches();
+    GK_onInput(H.doFrame("/track health +100")); TK_onInput(H.doFrame("/track health +100"));
+}
+
+// THE IRREALIS GUARD: damage the prose says did not happen
+fullHeal(300);
+H.assert(wound(301, "You raise your shield before the club can crush your skull.") === 0,
+    "irrealis: a blow prevented in the same clause deals nothing");
+H.assert(/prose prevented it/.test(SC_get("Event Log").entry), "the veto is reported, never silent");
+H.assert(TK_lastWound().veto === true && TK_lastWound().turn === 301, "TK_lastWound() carries the veto (the Observatory's seam)");
+H.assert(wound(302, "Your armor absorbs the blow that would have shattered your ribs.") === 0,
+    "irrealis: counterfactual damage deals nothing");
+H.assert(wound(303, "The troll missed twice, then its club crushed your ribs.") === 30,
+    "the guard is CLAUSE-scoped: a miss in an earlier clause does not excuse a real blow");
+
+// THE PAIN FRAME + LADDER: the pain reads its own severity, capped at strong
+fullHeal(310);
+H.assert(wound(311, "A piercing throb builds as you clutch your temple.") === 3,
+    "the 7/21 incident: pain frame reads a THROB (light), not a pierce (strong)");
+H.assert(TK_lastWound().frame === "pain" && TK_lastWound().tier === "light", "…and says so on the seam");
+H.assert(wound(312, "Pain explodes through your ribs.") === 12,
+    "pain caps at strong: was great (-20%) via the blade ladder, now strong (-12%)");
+H.assert(wound(313, "The pain is unbearable.") === 12, "pain ladder: 'unbearable' reads strong");
+H.assert(wound(314, "The pain is throbbing, dull and steady.") === 3, "pain ladder: 'throbbing' reads light");
+H.assert(wound(315, "Your shoulder throbs where the beam struck you.") === 3,
+    "coverage: body-part-as-subject now registers (was zero)");
+H.assert(wound(316, "You feel a searing pain lance up your leg.") === 6,
+    "pain ladder: 'searing' reads moderate");
+H.assert(wound(317, "The goblin howls, its pain echoing off the walls.") === 0,
+    "someone else's pain is not yours");
+
+// NO REGRESSION: the assault frame still rules what it always ruled
+fullHeal(320);
+H.assert(wound(321, "The automaton's fist crushes your ribs against the wall.") === 30, "assault: severe unchanged");
+fullHeal(322);
+H.assert(wound(323, "The blade slices your forearm open.") === 12, "assault: strong unchanged");
+H.assert(TK_lastWound().frame === "assault", "…and reports the frame that ruled");
+H.assert(wound(324, "Rubble bumps your shin as it tumbles past.") === 3, "assault: light unchanged");
+H.assert(wound(325, "You slam your fist into the goblin's jaw.") === 0, "attacking is still not being attacked");
+state.vars.TK.trackers.health.val = 47;   // leave the bar as the wound battery left it (heal tests follow)
+
 // --- Narrative healing (v0.2, ruling 4b) --------------------------------------------
 plain(80); TK_onOutput("The medic bandages your arm with practiced hands.");
 H.assert(state.vars.TK.trackers.health.val === 59, "moderate heal: +12%");

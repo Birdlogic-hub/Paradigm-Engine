@@ -1,4 +1,16 @@
-// ===== TrackerKit v0.3.2 =====
+// ===== TrackerKit v0.4.0 =====
+// v0.4.0 — the WOUND REREAD (proposal + veto pass, all leans, 8/13/2026):
+//  the parser stops asking "does a damage verb sit near you and a body part"
+//  and starts asking "what KIND of statement is this, and did it happen?"
+//  TWO FRAMES with their own ladders — PAIN consulted first and claims the
+//  line (most-specific wins), tiered by how the pain READS and capped at
+//  strong; then the ASSAULT ladder unchanged. Plus the IRREALIS GUARD: a
+//  candidate whose CLAUSE says the blow was prevented, hypothetical, evaded
+//  or still coming is vetoed and reported, never applied. New public seam
+//  TK_lastWound() feeds ObserverKit v0.1.2, so the next iteration argues
+//  from live rates instead of 22 invented sentences. Coverage frames
+//  (knockback, collapse, vocal, gesture, stumble, asphyxiation) stay OUT —
+//  a separate, evidence-gated wave by owner ruling.
 // v0.3.2 — UNIFIED CONSUMPTION (owner ruling 7/21): /eat, /drink, and the
 //  deterministic /meditate RETIRE — the flat restores were free-lunch
 //  buttons, and "GateKit can handle 'you eat' better than TrackerKit."
@@ -109,10 +121,123 @@ const TK_SETTINGS = { ENABLED: true, REPORT: true, HEALTH: 100, STAMINA: 100, HU
 
 // Load canary
 try {
-    if (typeof log === "function") log("[TrackerKit] library loaded (v0.3.2)");
+    if (typeof log === "function") log("[TrackerKit] library loaded (v0.4.0)");
 } catch (e) {}
 
-// --- The WOUND: severity tiers combed from FD's detectHurt --------------------------
+// --- The WOUND (v0.4.0, the Wound Reread): TWO FRAMES, each with its ladder --------
+// Proposal: Documentation/Design Proposals/The Wound Reread - Design Proposal.md
+// (veto pass 8/13/2026, all leans). Research: Documentation/Architecture/
+// Wound Parsing - Research Findings.md — lineage TAS (Yi1i1i) → FD → here.
+//
+// PRECEDENCE: the PAIN frame is consulted FIRST and claims the line. It is the
+// more specific reading (it needs a pain anchor), and the failure always ran one
+// way: pain prose misread as a blade ("piercing throb" → a 12% stab wound, live
+// 7/21). Most-specific-frame-wins is RegexLib's longest-first, one layer up.
+//
+// THE PAIN LADDER: tiered by how the pain READS, not by any verb — TAS's
+// adjective ladder. Pain reports CAP AT STRONG: great/severe are structural
+// destruction, which prose states as a blow and the assault frame catches in the
+// turn it happens; letting a symptom reach 30% double-charges one injury.
+// Blade-homonyms (piercing, shooting, stabbing, splitting, tearing) are
+// deliberately ABSENT from the ladder: inside a pain frame they do adjectival
+// work on their anchor ("a piercing throb" is a sharp twinge, not a puncture),
+// and admitting them re-imports the confusion the frame exists to remove.
+const TK_PAIN_STRONG ="agonizing|agonising|excruciating|unbearable|blinding|blistering|extreme|gnawing|gripping|horrible|intense|radiating|tremendous|white-hot|explodes|exploding|blossoms|bursts|screams|screaming";
+const TK_PAIN_MODERATE = "burning|burns|searing|sears|sharp|hot|fierce|deep|flares|flaring|pulses|pulsing|biting";
+const TK_PAIN_ANCHOR = "pain|ache|aches|aching|throb|throbs|throbbing|sting|stings|stinging|agony|pang|pangs|soreness|sore";
+// Built on first use: the shapes need TK_BODY, which is declared below with the
+// assault frame (keeping each frame's block whole reads better than hoisting one
+// string). Cached — the regexes are constant.
+var TK_PAIN_SHAPES_CACHE = null;
+function TK_painShapes() {
+    if (TK_PAIN_SHAPES_CACHE) return TK_PAIN_SHAPES_CACHE;
+    TK_PAIN_SHAPES_CACHE = [
+        // "you feel a searing pain" — the sensation frame (v0.2's light rule, absorbed)
+        new RegExp("\\byou(?:\\s+\\w+){0,3}\\s+feel(?:\\s+\\w+){0,5}\\s+(?:" + TK_PAIN_ANCHOR + "|bruised)\\b", "i"),
+        // "pain explodes through your ribs" · "a piercing throb in your temple"
+        new RegExp("\\b(?:" + TK_PAIN_ANCHOR + ")\\b(?:\\s+\\w+){0,5}\\s+(?:in|through|along|across|down|up|behind|inside)\\s+your\\b(?:\\s+\\w+){0,2}\\s*(?:" + TK_BODY + ")\\b", "i"),
+        // "your shoulder throbs" — the body-part-as-subject frame
+        new RegExp("\\byour\\s+(?:\\w+\\s+){0,2}(?:" + TK_BODY + ")(?:\\s+\\w+){0,3}\\s+(?:" + TK_PAIN_ANCHOR + "|burn|burns|burning|scream|screams|screaming)\\b", "i"),
+        // "the pain is unbearable" · "a piercing throb builds" — pain as subject
+        // (TAS's shape, widened to the indefinite article: second person implied,
+        // and the live 7/21 incident opens "A piercing throb…")
+        new RegExp("\\b(?:the|a|an)\\s+(?:\\w+\\s+){0,3}(?:" + TK_PAIN_ANCHOR + ")\\b(?:\\s+\\w+){0,4}", "i")
+    ];
+    return TK_PAIN_SHAPES_CACHE;
+}
+// Someone ELSE's pain is not ours (the fourth shape carries no you-anchor).
+const TK_PAIN_THIRD = /\b(?:'s|s'|its|their|his|her)\s+(?:pain|agony|ache)\b/i;
+
+// THE IRREALIS GUARD: damage the prose says did NOT happen — prevented,
+// hypothetical, evaded, still coming. Live probe (8/13): "you raise your shield
+// before the club can crush your skull" and "your armor absorbs the blow that
+// would have shattered your ribs" each took 30% of max Health. Scoped to the
+// matched span's CLAUSE, not its sentence: "the troll missed twice, then its
+// club crushed your ribs" must still wound (verified fixture).
+const TK_IRREALIS = new RegExp(
+    "\\b(?:would|could|might|should)(?:'ve|\\s+have)\\b"
+    + "|\\bhad\\s+it\\s+not\\b|\\bif\\b"
+    + "|\\b(?:nearly|narrowly|almost|barely)\\b"
+    + "|\\b(?:miss|misses|missed|avoid|avoids|avoided|dodge|dodges|dodged|evade|evades|evaded|sidestep|sidesteps|sidestepped)\\b"
+    + "|\\b(?:block|blocks|blocked|deflect|deflects|deflected|absorb|absorbs|absorbed|parry|parries|parried|shield|shields|shielded|catches|turns\\s+aside)\\b"
+    + "|\\b(?:glances|bounces|skitters|skips)\\s+off\\b"
+    + "|\\b(?:about|threatens|threatening|ready|moves|moving|aims|aiming|prepares|preparing)\\s+to\\b"
+    + "|\\b(?:does|did|do)\\s+not\\b|\\b(?:doesn't|didn't|don't|never)\\b"
+    + "|\\bbefore\\b(?:\\s+\\w+){0,6}\\s+(?:can|could|would)\\b", "i");
+
+function TK_clauseAround(text, index, len) {
+    let s = index, e = index + len;
+    while (s > 0 && ".!?,;:\n—".indexOf(text.charAt(s - 1)) === -1) s--;
+    while (e < text.length && ".!?,;:\n—".indexOf(text.charAt(e)) === -1) e++;
+    return text.slice(s, e);
+}
+
+function TK_painTier(span) {
+    if (new RegExp("\\b(?:" + TK_PAIN_STRONG + ")\\b", "i").test(span)) return { name: "strong", pct: 12 };
+    if (new RegExp("\\b(?:" + TK_PAIN_MODERATE + ")\\b", "i").test(span)) return { name: "moderate", pct: 6 };
+    return { name: "light", pct: 3 };
+}
+
+// Read the narrative once: pain frame first, then the assault ladder. Each
+// candidate is irrealis-guarded before it can win; a vetoed candidate does not
+// stop the scan (a prevented blow may still be followed by a real scrape).
+// Returns {frame, tier, pct, span} | {veto:true, ...} | null.
+function TK_readWound(out) {
+    let firstVeto = null;
+    const consider = function (frame, span, index, tier) {
+        const clause = TK_clauseAround(out, index, span.length);
+        if (TK_IRREALIS.test(clause)) {
+            if (!firstVeto) firstVeto = { frame: frame, tier: tier.name, pct: 0, span: span, veto: true };
+            return null;
+        }
+        return { frame: frame, tier: tier.name, pct: tier.pct, span: span, veto: false };
+    };
+    const shapes = TK_painShapes();
+    for (let i = 0; i < shapes.length; i++) {
+        const m = out.match(shapes[i]);
+        if (!m) continue;
+        if (i === 3 && TK_PAIN_THIRD.test(TK_clauseAround(out, m.index, m[0].length))) continue;
+        const hit = consider("pain", m[0], m.index, TK_painTier(m[0]));
+        if (hit) return hit;
+    }
+    for (let wi = 0; wi < TK_WOUND_TIERS.length; wi++) {
+        const tier = TK_WOUND_TIERS[wi];
+        for (let ri = 0; ri < tier.rx.length; ri++) {
+            const m = out.match(tier.rx[ri]);
+            if (!m) continue;
+            const hit = consider("assault", m[0], m.index, tier);
+            if (hit) return hit;
+        }
+    }
+    return firstVeto;
+}
+
+// Public seam (the Observatory): what the reread decided this turn.
+function TK_lastWound() {
+    try { const w = TK_state().lastWound; return (w && typeof w === "object") ? w : null; } catch (e) { return null; }
+}
+
+// --- The ASSAULT frame: severity tiers combed from FD's detectHurt ------------------
 const TK_BODY = "arm|arms|back|body|cheek|chest|chin|ear|eye|eyes|face|finger|fingers|flesh|foot|forearm|forehead|gut|hand|hands|head|hip|jaw|knee|leg|legs|lip|mouth|neck|nose|rib|ribs|scalp|shin|shoulder|shoulders|side|skin|skull|spine|stomach|temple|thigh|throat|torso|waist|wrist";
 function TK_hurtRx(verbs) {
     return new RegExp("\\b(?:" + verbs + ")(?:\\s+\\w+){0,3}\\s+(?:you|your)(?:\\s+\\w+){0,5}\\s+(?:" + TK_BODY + ")\\b", "i");
@@ -159,6 +284,7 @@ function TK_state() {
     if (typeof TK.costTurn !== "number") TK.costTurn = -1;   // one resource charge per action
     if (typeof TK.woundTurn !== "number") TK.woundTurn = -1; // one wound per action
     if (typeof TK.healTurn !== "number") TK.healTurn = -1;   // one narrative heal per action
+    if (!TK.lastWound || typeof TK.lastWound !== "object") TK.lastWound = null;  // the reread's verdict (v0.4.0)
     if (typeof TK.noteTurn !== "number") TK.noteTurn = -1;
     return TK;
 }
@@ -517,18 +643,24 @@ function TK_onOutput(text) {
                 }
             }
         }
-        // The WOUND (v0.2): scan the narrative for second-person damage.
-        // Highest tier wins, one wound per action, evidence logged.
+        // The WOUND (v0.4.0, the Wound Reread): pain frame first, then assault;
+        // every candidate irrealis-guarded. One wound per action, evidence logged.
         if (defs.health && TK.woundTurn !== turn && out.trim() !== "") {
-            for (let wi = 0; wi < TK_WOUND_TIERS.length; wi++) {
-                const tier = TK_WOUND_TIERS[wi];
-                let wm = null;
-                for (let ri = 0; ri < tier.rx.length && !wm; ri++) wm = out.match(tier.rx[ri]);
-                if (!wm) continue;
+            const hit = TK_readWound(out);
+            if (hit) {
                 TK.woundTurn = turn;
-                const dmg = Math.max(1, Math.round((defs.health.max - defs.health.min) * tier.pct / 100));
-                if (TK_move(cfg, defs.health, -dmg, tier.name + ": \"" + wm[0].slice(0, 44).trim() + "\"")) changed = true;
-                break;
+                TK.lastWound = { frame: hit.frame, tier: hit.tier, pct: hit.pct,
+                                 span: String(hit.span).slice(0, 60).trim(), veto: !!hit.veto, turn: turn };
+                if (hit.veto) {
+                    // The guard fired: say so. Silence is what hid every incident
+                    // in the case law; an invisible veto is an invisible bug.
+                    if (cfg.REPORT && typeof SC_report === "function") {
+                        try { SC_report("Trackers", "no wound — the prose prevented it: \"" + String(hit.span).slice(0, 44).trim() + "\""); } catch (e) {}
+                    }
+                } else {
+                    const dmg = Math.max(1, Math.round((defs.health.max - defs.health.min) * hit.pct / 100));
+                    if (TK_move(cfg, defs.health, -dmg, hit.frame + "/" + hit.tier + ": \"" + String(hit.span).slice(0, 44).trim() + "\"")) changed = true;
+                }
             }
         }
         // Narrative HEALING (v0.2, owner ruling 4b): someone treats you.
