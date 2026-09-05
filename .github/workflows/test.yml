@@ -1,0 +1,40 @@
+# The whole engine, every push. Lives at the repo ROOT because GitHub only
+# reads .github/workflows/ from there — the previous copy sat inside
+# "PE Essentials/" and had never run once.
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: PE Essentials harness
+        working-directory: PE Essentials
+        run: node test/run.js
+
+      - name: PRPG harness
+        working-directory: PRPG
+        run: node test/run.js
+
+      # Definition of done, stage one, enforced: the shipped bundle must be
+      # exactly what the module sources produce. Both make-bundle scripts are
+      # __dirname-relative, so running them from the root is safe.
+      # NOTE: "PE Characters - Library.js" is deliberately absent from the
+      # comparison — it embeds third-party pins that live outside this repo,
+      # so CI cannot regenerate it and its freshness stays a local concern.
+      - name: Bundles must match module sources
+        run: |
+          node "PE Essentials/make-bundle.js"
+          node "PRPG/make-bundle.js"
+          git diff --exit-code -- \
+            "PE Essentials/PE Essentials - Library.js" \
+            "PRPG/PRPG - Library.js" \
+            || (echo "::error::Stale bundle — run make-bundle.js and commit the result" && exit 1)

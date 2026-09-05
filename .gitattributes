@@ -1,2 +1,11 @@
-# Auto detect text files and perform LF normalization
-* text=auto
+# The one authoritative attributes file for this repo. Nested .gitattributes
+# files were removed deliberately: a deeper file wins over this one, and the
+# two that existed ("* text=auto", in PE Essentials/ and PRPG/) covered every
+# line of code in the project — they would have silently overridden the eol
+# rule below for exactly the files that need it.
+#
+# eol=lf keeps the WORKING TREE at LF on every platform, not just the stored
+# blobs. Without it a Windows checkout writes CRLF, and files nobody edited
+# show up as diffs — and CI's byte-comparison of regenerated bundles becomes
+# meaningless, since the bundles are generated from those same files.
+* text=auto eol=lf
