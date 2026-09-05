@@ -1078,7 +1078,18 @@ function GK_onOutputDebug(text) {
 }
 // ========================== END GK DEBUG SECTION ===============================
 
-// ===== InventoryKit v0.2.6 =====
+// ===== InventoryKit v0.2.7 =====
+// v0.2.7 — the KIT (player request, TemporaryCrunch 8/29/2026: "is there a way
+//  to pre-plant items into the inventory?"): two config-card lines stock a NEW
+//  adventure on turn 1 — `Starting Items` and `Starting Wallet` — following
+//  SkillKit's Starting Skills precedent (config cards are the sanctioned
+//  card→code direction). Same segment grammar as a multi-grab, plus the equip
+//  suffix, so armor can be worn from the first breath instead of carried:
+//    Starting Items: 2 red healing tonic; iron dagger; leather jerkin as armor
+//  A one-shot GRANT, not a floor (items are spent; a floor would restock them),
+//  never adjudicated, never on the /undo ring — it is scenario setup, not a
+//  deed. Guarded to turn ≤ 1 so adventures already underway are never
+//  retro-stocked when this version lands.
 // v0.2.6 — the PLAIN RECEIPT (owner ruling, 8/13/2026): case-law names —
 //  "the Grab" and kin — are scripter/design language and NEVER reach
 //  player-facing surfaces; the Event Log speaks plain. Two report strings
@@ -1229,6 +1240,8 @@ const INV_SETTINGS = {
     THROW_ARBITRATION: "outcome",
     USE_ARBITRATION: "outcome",
     EQUIP_ARBITRATION: "none",     // equip/unequip: bookkeeping by default; outcome = judged
+    STARTING_ITEMS: "(none)",      // the Kit (v0.2.7): granted once, on turn 1 only
+    STARTING_WALLET: "(none)",     // same, for currencies
     INVENTORY_IN_CONTEXT: true,    // the Standing Ledger (v0.2.4): always-on keys, the arbiter sees holdings
     REPORT: true                   // post mutations to the "Event Log" card
 };
@@ -1240,7 +1253,7 @@ const INV_UNDO_MAX = 20;       // undo ring buffer depth (SIS's depth, kept)
 
 // Load canary
 try {
-    if (typeof log === "function") log("[InventoryKit] library loaded (v0.2.6)");
+    if (typeof log === "function") log("[InventoryKit] library loaded (v0.2.7)");
 } catch (e) {}
 
 // --- Live settings -----------------------------------------------------------------
@@ -1254,6 +1267,9 @@ function INV_cfg() {
                 description: "Settings for the Inventory module. Arbitration per verb: "
                     + "none (bookkeeping only), outcome (deed certain, consequences judged), "
                     + "gated (nothing happens unless the ruling allows it). "
+                    + "Starting Items / Starting Wallet stock a NEW adventure on turn 1 — "
+                    + "semicolon-separated, optional amounts, optional 'as <category>' to "
+                    + "wear it from the start (e.g. 2 tonic; iron dagger; leather jerkin as armor). "
                     + "Edits apply on your next action."
             });
         } catch (e) {
@@ -1273,6 +1289,55 @@ function INV_cfg() {
     return cfg;
 }
 
+// --- The KIT (v0.2.7): what the scenario hands you before turn one ------------------
+// Player request (TemporaryCrunch, 8/29): "is there a way to pre-plant items into
+// the inventory?" — armor especially, since carrying it before wearing it is silly.
+// Follows SkillKit's Starting Skills precedent exactly: a config-card line, the
+// sanctioned card→code direction. Unlike a skill FLOOR this is a one-shot GRANT —
+// items are spent, and a floor that kept restocking them would be a duplication
+// glitch. Same segment grammar the player already knows from a multi-grab, plus
+// the equip suffix, so a creator writes what they'd type:
+//   Starting Items: 2 red healing tonic; iron dagger; leather jerkin as armor
+//   Starting Wallet: 50 gold; 12 silver coins
+// NOT undoable (it is scenario setup, not an act of yours) and never adjudicated.
+function INV_seedKit(cfg) {
+    const INV = INV_state();
+    const spoken = [];
+    const blank = function (s) { const v = String(s || "").trim().toLowerCase(); return !v || v === "(none)" || v === "none"; };
+    const segs = function (line) {
+        return String(line).split(/\s*;\s*/).map(function (x) { return x.trim(); }).filter(Boolean);
+    };
+    if (!blank(cfg.STARTING_ITEMS)) {
+        const list = segs(cfg.STARTING_ITEMS);
+        for (let i = 0; i < list.length; i++) {
+            let seg = list[i], cat = "";
+            const asm = seg.match(new RegExp("^(.*?)\\s+as\\s+(" + INV_EQUIP_ALT + ")\\s*$", "i"));
+            if (asm) { seg = asm[1].trim(); cat = asm[2].toLowerCase(); }
+            const a = (typeof RX_amount === "function") ? RX_amount(seg, 1) : { amount: 1, remainder: seg };
+            const name = String(a.remainder || "").trim();
+            if (!name || name.length > INV_NAME_CAP) continue;
+            const n = INV_add(name, Math.max(1, Math.min(INV_ITEM_CAP, a.amount)));
+            if (n < 1) continue;
+            if (cat && !INV_equipFind(name)) INV.equip[cat].push(name);
+            spoken.push(name + " x" + n + (cat ? " (" + cat + ")" : ""));
+        }
+    }
+    if (!blank(cfg.STARTING_WALLET)) {
+        const list = segs(cfg.STARTING_WALLET);
+        for (let i = 0; i < list.length; i++) {
+            const a = (typeof RX_amount === "function") ? RX_amount(list[i], 0) : { amount: 0, remainder: list[i] };
+            const cur = String(a.remainder || "").trim();
+            if (!cur || cur.length > INV_NAME_CAP || a.amount < 1) continue;
+            INV_walletAdd(cur, a.amount);
+            spoken.push(a.amount + " " + cur + " (wallet)");
+        }
+    }
+    if (spoken.length) {
+        INV_report("starting kit: " + spoken.join(", "));
+        INV_renderCard();
+    }
+}
+
 function INV_policy(verb) {
     const cfg = INV_cfg();
     return cfg[verb.toUpperCase() + "_ARBITRATION"] || "outcome";
@@ -1290,6 +1355,7 @@ function INV_state() {
     if (typeof INV.opTurn !== "number") INV.opTurn = -1;
     if (!Object.prototype.hasOwnProperty.call(INV, "lastStub")) INV.lastStub = null;
     if (!Array.isArray(INV.echo)) INV.echo = [];
+    if (typeof INV.seeded !== "boolean") INV.seeded = false;   // the Kit fires once (v0.2.7)
     if (!INV.equip || typeof INV.equip !== "object") INV.equip = {};
     for (let i = 0; i < INV_EQUIP_CATS.length; i++) {
         if (!Array.isArray(INV.equip[INV_EQUIP_CATS[i]])) INV.equip[INV_EQUIP_CATS[i]] = [];
@@ -1460,6 +1526,15 @@ function INV_onInput(text) {
     // action, not the first command. SC_render writes only on change, so
     // this never churns a card. Both degrade to no-ops without ParaCards.
     INV_cfg();
+    // The Kit (v0.2.7): stock a NEW adventure, once. The turn guard matters —
+    // an adventure already underway when this version lands must NOT have a
+    // starting kit dumped into it at turn 200; it stamps `seeded` and grants
+    // nothing. A creator adding the line mid-run is likewise ignored (say so
+    // in the guide), which is the honest cost of never duplicating items.
+    if (!INV.seeded) {
+        INV.seeded = true;
+        if (INV_turn() <= 1) { try { INV_seedKit(INV_cfg()); } catch (e) {} }
+    }
     INV_renderCard();
     if (INV_cfg().REPORT && typeof SC_reportEnsure === "function") SC_reportEnsure();
     const t = String(text || "");

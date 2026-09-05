@@ -95,6 +95,17 @@ Skills grow from *doing*: every ruling tallies its named skill — +1 for the at
 
 **Level** is what all your skills add up to (derived, never stored — cap 20), carries an epithet from *green* to *a living legend*, and deepens your gauges as you grow. On the SkillKit Config: `Starting Skills` grants rank floors (`Climbing=Intermediate`), `Show Progress` toggles the numbers on the Skills card, and creator-defined attribute lines (`- Strong: rank=Intermediate, skills=climbing/lifting/melee`) floor whole skill families.
 
+## Starting kit (for scenario creators)
+
+Two lines on the Inventory Config card stock a **new** adventure on its first turn — semicolon-separated, optional amounts, optional `as <category>` to have it already worn:
+
+```
+Starting Items: 2 field ration; iron dagger; leather jerkin as armor
+Starting Wallet: 50 gold; 12 silver coins
+```
+
+Granted once, never adjudicated, and not on the `/undo` ring — it's scenario setup, not something you did. Only fires on turn 1, so adding these lines to an adventure already in progress does nothing (start a fresh one to see them). SkillKit's `Starting Skills` line does the same job for skill ranks.
+
 ## Arbitration policies (Inventory Config)
 
 Each inventory verb has a policy line — `none` (pure bookkeeping), `outcome` (commit now, a failed ruling rolls it back), or `gated` (nothing happens unless the ruling allows). Defaults: Take/Collect/Give/Throw/Use `outcome`, Drop/Equip `none`. `Inventory In Context: true` keeps your ledger in the DM's view (recommended); `Report: true` posts mutations to the Event Log.

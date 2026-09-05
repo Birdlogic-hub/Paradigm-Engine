@@ -12,6 +12,33 @@ function play(n, input, modelOut) {
   return { t, out };
 }
 
+// --- v0.2.7 THE KIT: the scenario stocks a NEW adventure, once ----------------------
+// Seeded before the main battery so the rest of the suite runs on a normal ledger.
+H.turn(0, "do"); H.resetCaches();
+INV_onInput(H.doFrame("look around"));                       // materializes the config card
+SC_get("Inventory Config").entry = SC_get("Inventory Config").entry
+    .replace("Starting Items: (none)", "Starting Items: 2 field ration; iron dagger; leather jerkin as armor")
+    .replace("Starting Wallet: (none)", "Starting Wallet: 50 gold");
+state.vars.INV.seeded = false;                               // re-arm: the card was edited after turn 0's pass
+H.turn(1, "do"); H.resetCaches();
+INV_onInput(H.doFrame("look around"));
+H.assert(INV_count("field ration") === 2 && INV_count("iron dagger") === 1, "the Kit grants Starting Items with amounts");
+H.assert(INV_equipFind("leather jerkin") === "armor", "…and wears what the creator marked 'as armor'");
+H.assert(INV_walletGet("gold") === 50, "the Kit credits Starting Wallet");
+H.assert(/starting kit:/.test(SC_get("Event Log").entry), "the grant is reported, not silent");
+H.assert(state.vars.INV.log.length === 0, "the Kit is scenario setup — never on the /undo ring");
+INV_onInput(H.doFrame("look again"));
+H.assert(INV_count("field ration") === 2, "granted ONCE — a second pass never restocks");
+// An adventure already underway must never be retro-stocked mid-run.
+state.vars.INV.seeded = false;
+H.turn(200, "do"); H.resetCaches();
+INV_onInput(H.doFrame("much later"));
+H.assert(INV_count("field ration") === 2 && state.vars.INV.seeded === true,
+    "turn guard: a run already in progress stamps seeded and grants nothing");
+// Clear the kit so the rest of the suite starts from the ledger it always had.
+state.vars.INV.items = []; state.vars.INV.wallet = {};
+for (const c of INV_EQUIP_CATS) state.vars.INV.equip[c] = [];
+
 // Turn 1 materialization (EB ensure-on-input lineage): both cards exist on
 // the first player action, before any command is ever issued.
 H.turn(0, "do"); H.resetCaches();
