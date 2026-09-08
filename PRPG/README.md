@@ -97,14 +97,62 @@ Skills grow from *doing*: every ruling tallies its named skill — +1 for the at
 
 ## Starting kit (for scenario creators)
 
-Two lines on the Inventory Config card stock a **new** adventure on its first turn — semicolon-separated, optional amounts, optional `as <category>` to have it already worn:
+Stock every new adventure with items, gear and coin — no scripting required.
+
+### Where it lives
+
+A story card in **your scenario** (not in an adventure), titled exactly `Inventory Config`, with its **triggers left blank** — config cards are for you to edit, not for the AI to read.
+
+Write only the lines you care about. The engine fills in the rest on turn 1 and never overwrites what you wrote:
 
 ```
 Starting Items: 2 field ration; iron dagger; leather jerkin as armor
 Starting Wallet: 50 gold; 12 silver coins
 ```
 
-Granted once, never adjudicated, and not on the `/undo` ring — it's scenario setup, not something you did. Only fires on turn 1, so adding these lines to an adventure already in progress does nothing (start a fresh one to see them). SkillKit's `Starting Skills` line does the same job for skill ranks.
+That's the whole setup. Every new adventure from your scenario now starts stocked.
+
+### The syntax
+
+- **Semicolons separate entries** — commas are part of an item's name.
+- **Amounts are optional and lead** — `3 torches`; no number means one. (Max 99 per item, 40 characters per name.)
+- **`as <category>` equips it from the start** — `weapon`, `armor`, `clothes`, `accessory`, `tool`.
+- **Starting Wallet needs a number.** `50 gold` works; a bare `gold` is skipped.
+
+The `as` suffix is the point of the whole feature: `leather jerkin as armor` means the player *wakes up wearing it* — on the Character Sheet's Equipment block from turn one, no `/equip` needed, and the AI judges them as armored from the first sentence.
+
+### Four things that will bite you
+
+1. **It only fires on turn 1.** Editing the values does nothing to an adventure already underway — start a **fresh adventure** to see changes. That's deliberate (otherwise players mid-run would get items dumped on them), but it means iterating costs a new adventure each time.
+2. **The card must already exist in the scenario.** If you let the engine create it during play instead, you're past turn 1 and nothing seeds.
+3. **Scripting must be ON.** New scenarios ship with the toggle off, and off means the entire engine is silent — the most common cause of "nothing works."
+4. **Check the Event Log.** A successful seed posts one line: `starting kit: field ration x2, iron dagger x1, leather jerkin x1 (armor), 50 gold (wallet)`. No line means one of the above is wrong.
+
+The kit is scenario setup, not a deed — never judged, and `/undo` can't strip it.
+
+### The companion: starting skills
+
+On the **SkillKit Config** card, the same idea for aptitudes:
+
+```
+Starting Skills: Climbing=Intermediate, Stealth=Novice
+```
+
+Ranks run Untrained → Novice → Apprentice → Intermediate → Advanced → Expert → Master → Legendary. Unlike items these are **floors, not grants**: the player grows past them, and deleting the line withdraws the floor.
+
+### Classes without a class system
+
+Between the two cards you can build archetypes with zero scripting:
+
+```
+# the soldier
+Starting Items:  iron sword as weapon; chainmail as armor; 3 field ration
+Starting Skills: Swordplay=Intermediate, Athletics=Novice
+
+# the thief
+Starting Items:  worn lockpicks as tool; dark cloak as clothes
+Starting Skills: Stealth=Advanced, Lockpicking=Intermediate
+```
 
 ## Arbitration policies (Inventory Config)
 

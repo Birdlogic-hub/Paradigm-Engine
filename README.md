@@ -54,7 +54,7 @@ Don't have the item yet? `/equip rusty dagger as weapon` takes *and* equips it i
 | `/event [category]` | Force a random world event now (debug verb; requires `Report: true` on the Events Config) |
 | `/telemetry` | Echo the telemetry ring's status — how many rulings are recorded for the Observatory (requires `Report: true` on the Observer Config) |
 
-**Scenario creators**: the Inventory Config card's `Starting Items` and `Starting Wallet` lines stock a new adventure on turn 1 — `2 field ration; iron dagger; leather jerkin as armor` — so armor can be worn from the first breath rather than carried. Granted once; SkillKit's `Starting Skills` does the same for ranks.
+**Scenario creators**: the Inventory Config card's `Starting Items` and `Starting Wallet` lines stock a new adventure on turn 1 — `2 field ration; iron dagger; leather jerkin as armor` — so armor can be worn from the first breath rather than carried. Paired with SkillKit's `Starting Skills`, that's character archetypes with zero scripting; the full walkthrough is in the [starting kit guide](PRPG/README.md#starting-kit-for-scenario-creators).
 
 Skills have **no commands** — they grow from doing (every ruling tallies its skill; trivial and impossible teach nothing). Full detail, cards, and config reference: the [Paradigm RPG player's guide](PRPG/README.md).
 
