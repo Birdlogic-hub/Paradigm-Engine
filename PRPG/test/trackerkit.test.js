@@ -256,6 +256,44 @@ H.assert(wound(324, "Rubble bumps your shin as it tumbles past.") === 3, "assaul
 H.assert(wound(325, "You slam your fist into the goblin's jaw.") === 0, "attacking is still not being attacked");
 state.vars.TK.trackers.health.val = 47;   // leave the bar as the wound battery left it (heal tests follow)
 
+// --- v0.5.0 THE LOCK: the model ends the story, the engine keeps it ended -----------
+fullHeal(400);
+H.assert(TK_isDead() === null, "alive: the seam says so");
+// The killing turn keeps its death scene — the lock must not pre-empt the arbiter.
+state.vars.TK.trackers.health.val = 20;           // one severe wound (-30%) from the floor
+plain(401);
+const deathOut = TK_onOutput("The automaton's fist crushes your ribs, and your body gives way.");
+H.assert(/body gives way/.test(deathOut), "the turn that kills you still shows the ominous ending");
+H.assert(state.vars.TK.trackers.health.val === 0 && TK_isDead() && TK_isDead().turn === 401,
+    "…and death is recorded at the output pass, after the gauge settled");
+H.assert(/the story ends here/.test(SC_get("Event Log").entry), "the end is reported, never silent");
+// From the NEXT turn on, the lock bites at both ends.
+H.turn(402, "do"); H.resetCaches();
+const lockedIn = TK_onInput(H.doFrame("You stand up and keep walking"));
+H.assert(lockedIn === " " && state.vars.GK.commandTurn === 402,
+    "input: the action is replaced and the Check yields — no ruling on a corpse");
+const lockedOut = TK_onOutput("You rise, somehow unhurt, and stroll onward.");
+H.assert(/Your story has ended/.test(lockedOut) && !/stroll onward/.test(lockedOut),
+    "output: the model's continuation is replaced by the terminal line");
+H.assert(state.vars.TK.trackers.health.val === 0, "a corpse neither drifts nor heals");
+// Erase is the only way back — and it is free, because RewindKit restores TK.
+state.vars.TK.dead = null;                        // what a Rewind restore does
+H.turn(403, "do"); H.resetCaches();
+H.assert(TK_onInput(H.doFrame("You step back from the ledge")) !== " ", "erasing the death unlocks the story");
+// The narrative-only option survives as a switch (the original lean).
+fullHeal(404);
+SC_get("Trackers Config").entry = SC_get("Trackers Config").entry.replace("Death Lock: true", "Death Lock: false");
+state.vars.TK.trackers.health.val = 20;
+plain(405); TK_onOutput("The blade crushes your skull and everything stops.");
+H.assert(TK_isDead() !== null, "Death Lock: false still records the death…");
+H.turn(406, "do"); H.resetCaches();
+H.assert(/onward/.test(TK_onOutput("You wake in the dark, and press onward.")),
+    "…but never locks — narrative-only death, the option preserved");
+SC_get("Trackers Config").entry = SC_get("Trackers Config").entry.replace("Death Lock: false", "Death Lock: true");
+state.vars.TK.dead = null;
+fullHeal(407);
+state.vars.TK.trackers.health.val = 47;   // hand the heal battery the bar it expects
+
 // --- Narrative healing (v0.2, ruling 4b) --------------------------------------------
 plain(80); TK_onOutput("The medic bandages your arm with practiced hands.");
 H.assert(state.vars.TK.trackers.health.val === 59, "moderate heal: +12%");

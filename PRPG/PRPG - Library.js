@@ -2391,7 +2391,21 @@ function SK_onOutput(text) {
     return out;
 }
 
-// ===== TrackerKit v0.4.0 =====
+// ===== TrackerKit v0.5.0 =====
+// v0.5.0 — the LOCK (the Reckoning, owner ruling 9/8/2026 — the hard-lock
+//  option, overruling the narrative-only lean): the MODEL ends the story,
+//  the ENGINE keeps it ended. Health reaching its floor sets TK.dead at the
+//  OUTPUT pass — after the arbiter has already written the ominous ending,
+//  so the death scene is never pre-empted — and the lock bites from the
+//  next turn: input refuses commands and yields the Check, output is
+//  replaced by the terminal line. Deliberately NOT `stop: true` (platform
+//  research 8/12: returning stop produces player-facing errors); rewriting
+//  both ends is a harder lock with no error surface.
+//  THE ONLY WAY BACK IS ERASE — and it costs nothing: TK.dead lives in
+//  state.vars, so RewindKit restores it with everything else. Death is
+//  final unless the story itself is rewound.
+//  `Death Lock: false` restores the narrative-only behaviour (the original
+//  lean, preserved as an option). Seam: TK_isDead().
 // v0.4.0 — the WOUND REREAD (proposal + veto pass, all leans, 8/13/2026):
 //  the parser stops asking "does a damage verb sit near you and a body part"
 //  and starts asking "what KIND of statement is this, and did it happen?"
@@ -2510,11 +2524,15 @@ function SK_onOutput(text) {
 
 const TK_NOTE_OWNER = "TK";
 const TK_NOTE_CAP = 160;
-const TK_SETTINGS = { ENABLED: true, REPORT: true, HEALTH: 100, STAMINA: 100, HUNGER: 100, MANA: 0 };
+const TK_SETTINGS = {
+    ENABLED: true, REPORT: true, HEALTH: 100, STAMINA: 100, HUNGER: 100, MANA: 0,
+    DEATH_LOCK: true,   // the Lock (v0.5.0): a dead adventure refuses further turns
+    DEATH_MESSAGE: "Your story has ended. Erase this turn to step back into the moment before."
+};
 
 // Load canary
 try {
-    if (typeof log === "function") log("[TrackerKit] library loaded (v0.4.0)");
+    if (typeof log === "function") log("[TrackerKit] library loaded (v0.5.0)");
 } catch (e) {}
 
 // --- The WOUND (v0.4.0, the Wound Reread): TWO FRAMES, each with its ladder --------
@@ -2626,6 +2644,17 @@ function TK_readWound(out) {
 }
 
 // Public seam (the Observatory): what the reread decided this turn.
+// --- The LOCK (v0.5.0) --------------------------------------------------------------
+// Public seam: has the story ended? {turn, gauge} or null. Never throws.
+function TK_isDead() {
+    try { const d = TK_state().dead; return (d && typeof d === "object") ? d : null; } catch (e) { return null; }
+}
+
+function TK_lockOn(cfg) {
+    const v = (cfg && typeof cfg.DEATH_LOCK !== "undefined") ? cfg.DEATH_LOCK : true;
+    return !(v === false || String(v).toLowerCase() === "false");
+}
+
 function TK_lastWound() {
     try { const w = TK_state().lastWound; return (w && typeof w === "object") ? w : null; } catch (e) { return null; }
 }
@@ -2678,6 +2707,7 @@ function TK_state() {
     if (typeof TK.woundTurn !== "number") TK.woundTurn = -1; // one wound per action
     if (typeof TK.healTurn !== "number") TK.healTurn = -1;   // one narrative heal per action
     if (!TK.lastWound || typeof TK.lastWound !== "object") TK.lastWound = null;  // the reread's verdict (v0.4.0)
+    if (!TK.dead || typeof TK.dead !== "object") TK.dead = null;                 // the Lock (v0.5.0)
     if (typeof TK.noteTurn !== "number") TK.noteTurn = -1;
     return TK;
 }
@@ -2961,6 +2991,13 @@ function TK_onInput(text) {
         TK_renderCard(defs);                        // Trackers card materializes turn 1
         TK_refreshNote(cfg, defs);                  // note exists from turn 1; edits bite on input too
         if (cfg.REPORT && typeof SC_reportEnsure === "function") SC_reportEnsure();
+        // The Lock (v0.5.0): a corpse takes no actions. Cards still render above —
+        // the Sheet stays readable — but the turn is stamped bookkeeping so the
+        // Check never adjudicates the dead, and the action itself is replaced.
+        if (TK_isDead() && TK_lockOn(cfg)) {
+            if (typeof GK_markCommandTurn === "function") { try { GK_markCommandTurn(); } catch (e) {} }
+            return " ";
+        }
         if (typeof RX_command !== "function") return t;
         const cmd = RX_command(t, ["track", "rest", "sleep", "meditate"]);
         if (!cmd) return t;
@@ -3005,7 +3042,7 @@ function TK_onInput(text) {
 // reads GK_lastCheck() once per turn — doubt moves gauges, bookkeeping never
 // does (command turns are yielded and carry no ruling).
 function TK_onOutput(text) {
-    const out = String(text || "");
+    let out = String(text || "");
     try {
         const cfg = TK_cfg();
         if (!cfg.ENABLED) return out;
@@ -3013,6 +3050,15 @@ function TK_onOutput(text) {
         const defs = TK_defs(cfg);
         const turn = TK_turn();
         let changed = false;
+
+        // The Lock (v0.5.0), part one: if the story ALREADY ended before this
+        // pass, replace the output and stop. Checked first so a corpse neither
+        // drifts nor bleeds — and checked BEFORE the detection below, so the
+        // turn that kills you still shows the arbiter's ominous ending.
+        if (TK_isDead() && TK_lockOn(cfg)) {
+            TK_renderCard(defs);
+            return String(cfg.DEATH_MESSAGE || TK_SETTINGS.DEATH_MESSAGE);
+        }
         if (turn !== -1 && TK.actionTurn !== turn) {
             TK.actionTurn = turn;
             TK.actions++;
@@ -3099,6 +3145,18 @@ function TK_onOutput(text) {
                         if (rule.skills && (!skill || rule.skills.indexOf(skill) === -1)) continue;
                         if (TK_move(cfg, def, rule.delta, c.result === "fail" ? ("failed: " + (skill || "check")) : ("succeeded: " + (skill || "check")))) changed = true;
                     }
+                }
+            }
+        }
+        // The Lock, part two: the story ends here. Detected AFTER every gauge has
+        // settled and after the model's narration has already been written, so
+        // this turn keeps its death scene; the lock bites from the next turn.
+        if (!TK.dead && defs.health) {
+            const hr = TK_rec(defs.health);
+            if (hr.val <= defs.health.min) {
+                TK.dead = { turn: turn, gauge: defs.health.name || "Health" };
+                if (cfg.REPORT && typeof SC_report === "function") {
+                    try { SC_report("Trackers", "the story ends here — " + TK.dead.gauge + " reached " + defs.health.min); } catch (e) {}
                 }
             }
         }
