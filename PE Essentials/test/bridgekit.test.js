@@ -4,9 +4,9 @@ eval(H.load("CardLib", "GateKit", "BridgeKit"));
 
 // --- IS-shaped fixtures (built from the study's line references, rule 9:
 // live-shaped text is LAW — these mirror IS v1.0.2's actual assembly) -------------
-const IS_DIRECTIVE = "<SYSTEM>\n# OPERATING ENVIRONMENT\n- Devin is both the perspective (\"you\") character of the story AND the real player.\n- Leah is both the namesake character in the story AND an agentic language model with meta goals.\n</SYSTEM>\n\n# Leah's brain and inner self: [\n[3] (current_goal: `Find the vault before Devin does`)\n]\n\n";
+const IS_DIRECTIVE = "<SYSTEM>\n# OPERATING ENVIRONMENT\n- Alex is both the perspective (\"you\") character of the story AND the real player.\n- Leah is both the namesake character in the story AND an agentic language model with meta goals.\n</SYSTEM>\n\n# Leah's brain and inner self: [\n[3] (current_goal: `Find the vault before Alex does`)\n]\n\n";
 const IS_TASK_TAIL = "\n\n<SYSTEM>\n# STRICT OUTPUT FORMAT\nYou must output one short parenthetical task followed by the story continuation.\n\n## SHORT TASK (REQUIRED)\nStart your output **immediately** with:\n   (any_key_name = `One thought sentence.`)\n</SYSTEM>\n\n";
-const IS_NONDIRECTIVE = "<SYSTEM>\n# Always continue the story from Devin's second person perspective.\n</SYSTEM>\n\n";
+const IS_NONDIRECTIVE = "<SYSTEM>\n# Always continue the story from Alex's second person perspective.\n</SYSTEM>\n\n";
 
 // --- Task turn: GateKit yields through the existing seam --------------------------
 H.turn(1, "do"); H.resetCaches();
