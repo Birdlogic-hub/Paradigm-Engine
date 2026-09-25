@@ -1,4 +1,9 @@
-// ===== SkillKit v0.3.0 =====
+// ===== SkillKit v0.3.1 =====
+// v0.3.1 — the note under code resolution (veto ⚑7, 9/25): when GateKit's
+//  Resolution is code (GK_resolution(), GateKit v0.9.1) the arbiter note
+//  is the epithet alone — "player (a green adventurer)" — because the success
+//  table already lists every rank. Model resolution keeps the full note.
+//  A mid-game switch reaches the note at the next output pass.
 // v0.3.0 — VOLTA'S LADDER (owner rulings 9/25/2026, with GateKit v0.9.0's
 //  code resolution; Documentation/Design Proposals/Code Resolution -
 //  Design Proposal.md). Same eight names, same thresholds; four rules
@@ -136,7 +141,7 @@ const SK_NOTE_OWNER = "SK";
 
 // Load canary
 try {
-    if (typeof log === "function") log("[SkillKit] library loaded (v0.3.0)");
+    if (typeof log === "function") log("[SkillKit] library loaded (v0.3.1)");
 } catch (e) {}
 
 // Live settings. Uncached on purpose: SkillKit runs once per turn (one
@@ -429,6 +434,13 @@ function SK_evict(cfg, keep) {
 function SK_refreshNote(attrs) {
     if (typeof GK_setArbiterNote !== "function") return;
     const a = attrs || SK_attributes(SK_cfg());
+    // v0.3.1 (veto ⚑7): under code resolution GateKit's success table already
+    // names every rank (and canonicalizes the names) — the note keeps the epithet only.
+    if (typeof GK_resolution === "function" && GK_resolution() === "code") {
+        GK_setArbiterNote(SK_NOTE_OWNER, "player (" + SK_epithet() + ")");
+        SK_state().noteTurn = SK_turn();
+        return;
+    }
     const eff = SK_effective(a);
     const names = Object.keys(eff).sort(function (x, y) {
         return eff[y] - eff[x] || x.localeCompare(y);

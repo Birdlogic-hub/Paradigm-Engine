@@ -125,7 +125,10 @@ out = GK_onOutput("skill=climbing; difficulty=novice; check=fail;\nYou slip.");
 H.assert(GK_lastCheck().turn !== 140 && /^You slip\./.test(out) && logLines.some(l => /UNPARSED/.test(l)),
     "model mode: a rank-ladder verdict is stripped and logged, never parsed");
 
+H.assert(GK_resolution() === "model", "GK_resolution() reads model by default (v0.9.1)");
 SC_get("GateKit Config").entry = SC_get("GateKit Config").entry.replace("Resolution: model", "Resolution: code");
+H.resetCaches();
+H.assert(GK_resolution() === "code", "GK_resolution() follows the live card");
 function codeTurn(n, action, roll) {
     H.turn(n, "do", H.doFrame(action)); H.resetCaches();
     GK_onInput(H.doFrame(action));

@@ -1,4 +1,6 @@
-# GateKit v0.9.0 — the Check primitive
+# GateKit v0.9.1 — the Check primitive
+
+**v0.9.1** adds `GK_resolution()` → `"model"` or `"code"`, so other modules can ask which resolution is live.
 
 **v0.9.0 — code resolution (opt-in).** A new config line, `Resolution: model|code`. `model` (the default) is the d20 arbiter, unchanged. With `Resolution: code`:
 - The arbiter rates difficulty on the skill-rank ladder: `trivial | untrained | novice | apprentice | intermediate | advanced | expert | master | legendary | impossible`, against SkillKit's benchmarks when SkillKit is pasted.

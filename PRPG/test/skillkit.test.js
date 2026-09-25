@@ -262,6 +262,8 @@ H.assert(/climbing — 0 Steps and gentle slopes; 1 Easy scrambles with abundant
     "per-skill benchmarks join the scale");
 H.assert(/- climbing: apprentice\n/.test(joint) && /- any other skill: novice\n/.test(joint),
     "roll 20: climbing (Novice) clears apprentice (35% ≥ 20) — everyone else only novice");
+H.assert(/^player \((a|an) [a-z ]+\)$/.test(state.vars.GK.notes.SK) && !/skills —/.test(joint),
+    "code mode: the note is the epithet alone — the table already lists the ranks (v0.3.1, veto ⚑7)");
 GK_onOutput("skill=climbing; difficulty=apprentice; check=success;\nYou top out.");
 H.assert(GK_lastCheck().skillRank === 1 && GK_lastCheck().compliant === true && GK_lastCheck().difficulty === "major",
     "GateKit reads the held rank through SK_rank");
@@ -278,5 +280,9 @@ ruling(76, "You free-climb the obsidian spire", "skill=climbing; difficulty=lege
 H.assert(state.vars.SK.skills.climbing.uses === usesNow + 1,
     "the repeat guard still holds above the band (the uncounted failure didn't reset it)");
 SC_get("GateKit Config").entry = SC_get("GateKit Config").entry.replace("Resolution: code", "Resolution: model");
+H.resetCaches();
+SK_onOutput("Back on the d20.");
+H.assert(/^player \((a|an) [a-z ]+\) skills — .*climbing: /.test(state.vars.GK.notes.SK),
+    "switched back to model: the full rank note returns at the next output pass");
 
 H.summary("SkillKit");

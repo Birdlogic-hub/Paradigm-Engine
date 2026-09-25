@@ -1,4 +1,7 @@
-// ===== GateKit v0.9.0 =====
+// ===== GateKit v0.9.1 =====
+// v0.9.1 — GK_resolution() → "model"|"code", the read seam for the live
+//  Resolution setting (veto ⚑7, 9/25: SkillKit trims its arbiter note to the
+//  epithet in code mode, since the success table already lists the ranks).
 // v0.9.0 — CODE RESOLUTION (owner rulings 9/25/2026 — Volta's Check, ported
 //  per the 9/23 feasibility study; Documentation/Design Proposals/Code
 //  Resolution - Design Proposal.md). A new config line, Resolution:
@@ -100,6 +103,7 @@
 //   GK_isCommandTurn()    → is this turn stamped? (v0.8.2 — ask, don't peek)
 //   GK_setArbiterNote(owner, line) → one rendered line in the arbiter block (160 cap)
 //   GK_chance(skillRank, difficultyRank) → success odds 0..1 (v0.9.0, code resolution)
+//   GK_resolution()       → "model" | "code", the live Resolution setting (v0.9.1)
 // ---------------------------------------------------------------------------
 
 // Defaults. With ParaCard present these seed the editable "GateKit Config"
@@ -144,6 +148,11 @@ function GK_rollPercent() {
 
 function GK_codeMode(cfg) {
     return String((cfg || GK_cfg()).RESOLUTION || "").trim().toLowerCase() === "code";
+}
+
+// Public seam (v0.9.1): which resolution is live — extensions ask, never peek.
+function GK_resolution() {
+    return GK_codeMode() ? "code" : "model";
 }
 
 // Rank index of a name on the ladder ("Expert" -> 5, "5" -> 5), else -1.
@@ -236,7 +245,7 @@ const GK_PROMPT_CODE = [
 // Load canary: appears in Console Log / Script Test logs on EVERY hook run.
 // If you don't see this line, the Library isn't attached, saved, or executing.
 try {
-    if (GK_cfg().DEBUG_CONSOLE) log("[GateKit] library loaded (v0.9.0)");
+    if (GK_cfg().DEBUG_CONSOLE) log("[GateKit] library loaded (v0.9.1)");
 } catch (e) {}
 
 // Verdict line emitted by the model (v0.7.0 skill-first schema: the model

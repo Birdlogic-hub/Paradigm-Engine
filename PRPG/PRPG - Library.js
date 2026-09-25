@@ -620,7 +620,10 @@ function SC_report(owner, line, turnNo) {
     return card;
 }
 
-// ===== GateKit v0.9.0 =====
+// ===== GateKit v0.9.1 =====
+// v0.9.1 — GK_resolution() → "model"|"code", the read seam for the live
+//  Resolution setting (veto ⚑7, 9/25: SkillKit trims its arbiter note to the
+//  epithet in code mode, since the success table already lists the ranks).
 // v0.9.0 — CODE RESOLUTION (owner rulings 9/25/2026 — Volta's Check, ported
 //  per the 9/23 feasibility study; Documentation/Design Proposals/Code
 //  Resolution - Design Proposal.md). A new config line, Resolution:
@@ -722,6 +725,7 @@ function SC_report(owner, line, turnNo) {
 //   GK_isCommandTurn()    → is this turn stamped? (v0.8.2 — ask, don't peek)
 //   GK_setArbiterNote(owner, line) → one rendered line in the arbiter block (160 cap)
 //   GK_chance(skillRank, difficultyRank) → success odds 0..1 (v0.9.0, code resolution)
+//   GK_resolution()       → "model" | "code", the live Resolution setting (v0.9.1)
 // ---------------------------------------------------------------------------
 
 // Defaults. With ParaCard present these seed the editable "GateKit Config"
@@ -766,6 +770,11 @@ function GK_rollPercent() {
 
 function GK_codeMode(cfg) {
     return String((cfg || GK_cfg()).RESOLUTION || "").trim().toLowerCase() === "code";
+}
+
+// Public seam (v0.9.1): which resolution is live — extensions ask, never peek.
+function GK_resolution() {
+    return GK_codeMode() ? "code" : "model";
 }
 
 // Rank index of a name on the ladder ("Expert" -> 5, "5" -> 5), else -1.
@@ -858,7 +867,7 @@ const GK_PROMPT_CODE = [
 // Load canary: appears in Console Log / Script Test logs on EVERY hook run.
 // If you don't see this line, the Library isn't attached, saved, or executing.
 try {
-    if (GK_cfg().DEBUG_CONSOLE) log("[GateKit] library loaded (v0.9.0)");
+    if (GK_cfg().DEBUG_CONSOLE) log("[GateKit] library loaded (v0.9.1)");
 } catch (e) {}
 
 // Verdict line emitted by the model (v0.7.0 skill-first schema: the model
@@ -2085,7 +2094,12 @@ function INV_onOutput(text) {
     return out;
 }
 
-// ===== SkillKit v0.3.0 =====
+// ===== SkillKit v0.3.1 =====
+// v0.3.1 — the note under code resolution (veto ⚑7, 9/25): when GateKit's
+//  Resolution is code (GK_resolution(), GateKit v0.9.1) the arbiter note
+//  is the epithet alone — "player (a green adventurer)" — because the success
+//  table already lists every rank. Model resolution keeps the full note.
+//  A mid-game switch reaches the note at the next output pass.
 // v0.3.0 — VOLTA'S LADDER (owner rulings 9/25/2026, with GateKit v0.9.0's
 //  code resolution; Documentation/Design Proposals/Code Resolution -
 //  Design Proposal.md). Same eight names, same thresholds; four rules
@@ -2223,7 +2237,7 @@ const SK_NOTE_OWNER = "SK";
 
 // Load canary
 try {
-    if (typeof log === "function") log("[SkillKit] library loaded (v0.3.0)");
+    if (typeof log === "function") log("[SkillKit] library loaded (v0.3.1)");
 } catch (e) {}
 
 // Live settings. Uncached on purpose: SkillKit runs once per turn (one
@@ -2516,6 +2530,13 @@ function SK_evict(cfg, keep) {
 function SK_refreshNote(attrs) {
     if (typeof GK_setArbiterNote !== "function") return;
     const a = attrs || SK_attributes(SK_cfg());
+    // v0.3.1 (veto ⚑7): under code resolution GateKit's success table already
+    // names every rank (and canonicalizes the names) — the note keeps the epithet only.
+    if (typeof GK_resolution === "function" && GK_resolution() === "code") {
+        GK_setArbiterNote(SK_NOTE_OWNER, "player (" + SK_epithet() + ")");
+        SK_state().noteTurn = SK_turn();
+        return;
+    }
     const eff = SK_effective(a);
     const names = Object.keys(eff).sort(function (x, y) {
         return eff[y] - eff[x] || x.localeCompare(y);

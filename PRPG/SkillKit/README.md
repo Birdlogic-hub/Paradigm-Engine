@@ -1,4 +1,6 @@
-# SkillKit v0.3.0 — the Skill
+# SkillKit v0.3.1 — the Skill
+
+**v0.3.1:** with GateKit's `Resolution: code`, the arbiter note is just the epithet ("player (a green adventurer)"), because the success table already lists every rank.
 
 **v0.3.0 — Volta's ladder (9/25/2026).** Same eight ranks and thresholds, with Volta's rules:
 - **Benchmarks.** Each rank has a description of what that rank can do, and the Skills card shows it: `Climbing: Advanced — Sophisticated or demanding tasks`. Give one skill its own descriptions with a SkillKit Config line: `- Climbing: benchmarks=Steps and gentle slopes | Easy scrambles with abundant holds | …`. It takes up to eight entries, lowest rank first, and blanks keep the generic text.
