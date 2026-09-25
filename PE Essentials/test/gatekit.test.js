@@ -137,6 +137,8 @@ function codeTurn(n, action, roll) {
 }
 let cctx = codeTurn(150, "You climb", 50);
 H.assert(cctx.endsWith("</SYSTEM>") && !/luck=/.test(cctx) && !/d20/.test(cctx), "code block: no luck line, no d20");
+H.assert(/trivial = no one could fail, even without training\. Never rate a task trivial because this player is skilled/.test(cctx),
+    "trivial is pinned to anyone, never relative to this player's skill (v0.9.2)");
 H.assert(/untrained < novice < apprentice < intermediate < advanced < expert < master < legendary/.test(cctx),
     "without SkillKit the scale is the bare ladder");
 H.assert(/- any other skill: untrained\nOtherwise it FAILS\./.test(cctx), "roll 50: untrained clears (70%), novice doesn't (35%)");

@@ -1,4 +1,6 @@
-# GateKit v0.9.1 — the Check primitive
+# GateKit v0.9.2 — the Check primitive
+
+**v0.9.2** tightens the code-mode definition of trivial: "no one could fail, even without training", never "this player is too skilled to fail".
 
 **v0.9.1** adds `GK_resolution()` → `"model"` or `"code"`, so other modules can ask which resolution is live.
 

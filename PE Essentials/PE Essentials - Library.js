@@ -620,7 +620,14 @@ function SC_report(owner, line, turnNo) {
     return card;
 }
 
-// ===== GateKit v0.9.1 =====
+// ===== GateKit v0.9.2 =====
+// v0.9.2 — trivial means trivial for ANYONE (owner call, 9/25): the code-mode
+//  block defined trivial only as "cannot fail", which a skilled enough player
+//  makes true of almost anything — and trivial never teaches (SkillKit), so a
+//  relative reading would quietly stop a specialty growing. The line now pins
+//  trivial to "no one could fail, even without training" and forbids rating a
+//  task trivial because this player is skilled. Measured in play: trivial
+//  rulings should not climb with the rank held (ObserverKit's rank + d fields).
 // v0.9.1 — GK_resolution() → "model"|"code", the read seam for the live
 //  Resolution setting (veto ⚑7, 9/25: SkillKit trims its arbiter note to the
 //  epithet in code mode, since the success table already lists the ranks).
@@ -853,7 +860,7 @@ const GK_PROMPT_CODE = [
     "You are the silent arbiter of player actions. Before narrating, rate how hard the player's most recent action is. The outcome is already decided by the table below: you rate the task, the table rules the result.",
     "Rate difficulty as the skill rank the task demands under ordinary conditions, judged from the task alone:",
     "{{SCALE}}",
-    "trivial = cannot fail. impossible = cannot succeed.",
+    "trivial = no one could fail, even without training. Never rate a task trivial because this player is skilled; rate it as if you did not know who is attempting it. impossible = cannot succeed.",
     "Outcome table. The check SUCCEEDS when the difficulty is at or below:",
     "{{TABLE}}",
     "Otherwise it FAILS.",
@@ -867,7 +874,7 @@ const GK_PROMPT_CODE = [
 // Load canary: appears in Console Log / Script Test logs on EVERY hook run.
 // If you don't see this line, the Library isn't attached, saved, or executing.
 try {
-    if (GK_cfg().DEBUG_CONSOLE) log("[GateKit] library loaded (v0.9.1)");
+    if (GK_cfg().DEBUG_CONSOLE) log("[GateKit] library loaded (v0.9.2)");
 } catch (e) {}
 
 // Verdict line emitted by the model (v0.7.0 skill-first schema: the model
