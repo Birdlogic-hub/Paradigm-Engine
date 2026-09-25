@@ -7,7 +7,7 @@ eval(H.load("CardLib", "GateKit", "SkillKit"));
 
 // Helper: run one adjudicated turn end-to-end and settle a verdict.
 function ruling(turn, action, verdictLine) {
-    H.turn(turn, "do"); H.resetCaches();
+    H.turn(turn, "do", H.doFrame(action)); H.resetCaches();   // the action is in history by output (repeat guard reads it)
     GK_onInput(H.doFrame(action));
     const ctx = GK_onContext(H.ctx());
     let out = GK_onOutput(verdictLine + "\nThe story continues.");
@@ -22,23 +22,24 @@ SK_onOutput("Nothing judged yet.");
 H.assert(!!SC_get("SkillKit Config") && /Starting Skills: \(none\)/.test(SC_get("SkillKit Config").entry), "SkillKit Config materializes on first output pass");
 H.assert(!!SC_get("Skills") && /none yet/.test(SC_get("Skills").entry), "Skills card materializes empty");
 
-// --- Tally: attempt +1, success +2 (success-weighted accrual) ---------------------
+// --- Tally: one practice per attempt (v0.3.0 — Volta's rule; was +2 on success) ---
 ruling(2, "You climb the wall", "skill=climbing; difficulty=major; check=success;");
-H.assert(state.vars.SK.skills.climbing && state.vars.SK.skills.climbing.uses === 2, "success tallies +2");
+H.assert(state.vars.SK.skills.climbing && state.vars.SK.skills.climbing.uses === 1, "success earns one practice (no longer double)");
 H.assert(SK_rank("climbing") === "Novice" && SK_rank("basket weaving") === "Untrained" && SK_rank("") === "Untrained",
     "SK_rank public seam: effective rank, unknown reads Untrained (v0.2.2, the Observatory)");
-H.assert(/- Climbing: Novice \(2\/10\)/.test(SC_get("Skills").entry), "Skills card shows Novice with progress toward the 10-use wall");
+H.assert(/- Climbing: Novice — Crude tasks with time and suitable tools \(1\/10\)/.test(SC_get("Skills").entry),
+    "Skills card shows Novice, its benchmark, and progress toward the 10 wall (v0.3.0)");
 
 // --- Retry guard: same actionCount never re-tallies --------------------------------
 SK_onOutput("Retry replay of the same turn.");
-H.assert(state.vars.SK.skills.climbing.uses === 2, "retry replay does not re-tally");
+H.assert(state.vars.SK.skills.climbing.uses === 1, "retry replay does not re-tally");
 
 // --- Rank thresholds + rank-up reporting -------------------------------------------
-ruling(3, "You climb again", "skill=climbing; difficulty=minor; check=fail;");        // 3 uses
-H.assert(/- Climbing: Novice \(3\/10\)/.test(SC_get("Skills").entry), "3 uses still Novice under the raised wall");
+ruling(3, "You climb again", "skill=climbing; difficulty=minor; check=fail;");        // 2 practice
+H.assert(/- Climbing: Novice — .+ \(2\/10\)/.test(SC_get("Skills").entry), "a failure earns the same one practice");
 
 // --- The note: rendered in GateKit's block after the luck line ----------------------
-H.turn(4, "do"); H.resetCaches();
+H.turn(4, "do", H.doFrame("You climb once more")); H.resetCaches();
 GK_onInput(H.doFrame("You climb once more"));
 const ctx4 = GK_onContext(H.ctx());
 H.assert(/luck=\d+ \(a d20 roll\)\nplayer \(a green adventurer\) skills — climbing: novice \(unlisted skills: untrained\)/.test(ctx4), "arbiter note rides the block directly after the luck line (epithet first, v0.2.0)");
@@ -46,7 +47,7 @@ GK_onOutput("skill=climbing; difficulty=minor; check=partial;\nYou slip but catc
 SK_onOutput("");
 
 // --- Partial: +1 attempt, lift bucket p ---------------------------------------------
-H.assert(state.vars.SK.skills.climbing.uses === 4, "partial tallies +1");
+H.assert(state.vars.SK.skills.climbing.uses === 3, "partial tallies +1");
 H.assert(state.vars.SK.skills.climbing.lift.novice.p === 1, "partial recorded in lift bucket (novice held at attempt)");
 
 // --- Lift keyed by rank HELD AT ATTEMPT ---------------------------------------------
@@ -57,17 +58,24 @@ H.assert(state.vars.SK.skills.climbing.lift.novice.f === 1, "fail keyed at novic
 // (Turn numbers jump forward here, then the suite resumes at lower turns —
 // that reads to the engine as an erase, which it tolerates by design; the
 // Event Log assertions run before the rewind drops them.)
+// v0.3.0 — Volta's repeat guard: the same action at the same difficulty as
+// this skill's last practice earns nothing, however many times it's typed.
 for (let t = 40; t < 43; t++) {
     ruling(t, "You scale the cliff face", "skill=climbing; difficulty=major; check=success;");
 }
-H.assert(state.vars.SK.skills.climbing.uses === 10, "three contested successes reach the wall (4+6=10)");
+H.assert(state.vars.SK.skills.climbing.uses === 4, "repeat guard: three identical attempts earn one practice (3+1)");
+for (let t = 43; t < 49; t++) {
+    ruling(t, "You scale the cliff face, pitch " + t, "skill=climbing; difficulty=major; check=success;");
+}
+H.assert(state.vars.SK.skills.climbing.uses === 10, "six distinct attempts reach the wall (4+6=10)");
 H.assert(/climbing: Novice → Apprentice/.test(SC_get("Event Log").entry), "rank-up posted at the 10-use threshold");
-H.assert(/- Climbing: Apprentice \(10\/25\)/.test(SC_get("Skills").entry), "Apprentice with progress toward 25");
+H.assert(/- Climbing: Apprentice — Ordinary tasks under normal conditions \(10\/25\)/.test(SC_get("Skills").entry), "Apprentice with progress toward 25");
 
 // --- Canonicalization: punctuation/case variants merge ------------------------------
 ruling(5, "You pick the lock", "skill=Lock-Picking!; difficulty=minor; check=success;");
 ruling(6, "You pick another", "skill=lock-picking; difficulty=minor; check=success;");
-H.assert(state.vars.SK.skills["lock-picking"] && state.vars.SK.skills["lock-picking"].uses === 4, "name variants tally the same canonical skill");
+H.assert(state.vars.SK.skills["lock-picking"] && state.vars.SK.skills["lock-picking"].uses === 2, "name variants tally the same canonical skill");
+H.assert(SK_rank("Lock-Picking!") === "Novice", "SK_rank canonicalizes as tallies do (v0.3.0 — was a miss)");
 
 // --- Doubt teaches (v0.1.2): trivial and impossible rulings never accrue -------------
 ruling(30, "You pick up a pebble", "skill=inventory management; difficulty=trivial; check=success;");
@@ -85,8 +93,8 @@ H.turn(8, "do"); H.resetCaches();
 GK_onInput(H.doFrame("You forage"));
 GK_onContext(H.ctx());
 SK_onOutput(GK_onOutput("skill=survival; difficulty=minor; check=success;\nYou find mushrooms."));
-H.assert(state.vars.SK.skills.survival.uses === 27, "floor (25) applied once + success (+2) stacks on top");
-H.assert(/Survival: Intermediate \(27\/50\)/.test(SC_get("Skills").entry), "floored skill projects rank + progress (the obvious ladder: next wall 50)");
+H.assert(state.vars.SK.skills.survival.uses === 26, "floor (25) applied once + one practice stacks on top");
+H.assert(/Survival: Intermediate — Well-made or moderately demanding tasks \(26\/50\)/.test(SC_get("Skills").entry), "floored skill projects rank + progress (the obvious ladder: next wall 50)");
 // Show Progress: false hides the numbers (player choice; arbiter never saw them)
 SC_get("SkillKit Config").entry = SC_get("SkillKit Config").entry.replace("Show Progress: true", "Show Progress: false");
 SK_onOutput("re-render");
@@ -96,7 +104,7 @@ SC_get("SkillKit Config").entry = SC_get("SkillKit Config").entry.replace("Show 
 H.turn(9, "do"); H.resetCaches();
 GK_onInput(H.doFrame("You rest"));
 SK_onOutput("Quiet turn.");
-H.assert(state.vars.SK.skills.survival.uses === 27, "floor never re-applies");
+H.assert(state.vars.SK.skills.survival.uses === 26, "floor never re-applies");
 
 // --- Note cap: many skills stay under 160 chars --------------------------------------
 for (let t = 10; t < 20; t++) {
@@ -172,7 +180,7 @@ state.vars.SK.skills.alpha.uses = 100;   // dip (eviction class)
 SK_onOutput("Yet more narration.");
 H.assert(state.vars.SK.levelSeen === SK_level() && SC_get("Event Log").entry === lvLogBefore, "dips update the guard silently");
 
-// Floors: creator-defined derivation clamps.
+// Floors: creator-defined baselines (v0.3.0 — Volta's start + practice; were clamps).
 SC_get("SkillKit Config").entry += "\n- Strong: rank=Intermediate, skills=climbing/lifting\n- Broken line here\n- Weird: rank=Sublime, skills=dancing";
 const attrs2 = SK_attributes(SK_cfg());
 H.assert(attrs2.names.length === 1 && attrs2.floors.climbing === 25 && attrs2.floors.lifting === 25,
@@ -182,20 +190,93 @@ H.assert(/skipped malformed line/.test(SC_get("Event Log").entry) && /unknown ra
 const totalBefore = SK_total();
 state.vars.SK.skills.climbing = { uses: 3, tallyTurn: -1, lift: {} };
 SK_renderCard(SK_cfg());
-H.assert(/- Climbing: Intermediate \(3 earned\)/.test(SC_get("Skills").entry), "floor clamps the rank up; earned progress shown honestly");
-H.assert(/- Lifting: Intermediate \(0 earned\)/.test(SC_get("Skills").entry), "floored skills materialize untracked");
+H.assert(/- Climbing: Intermediate — .+ \(3 earned · 28\/50\)/.test(SC_get("Skills").entry), "earned adds on top of the floor (25+3); earned shown honestly");
+H.assert(/- Lifting: Intermediate — .+ \(0 earned · 25\/50\)/.test(SC_get("Skills").entry), "floored skills materialize untracked");
 H.assert(/Attributes: Strong/.test(SC_get("Skills").entry), "attribute names surface on the card");
 H.assert(SK_total() === totalBefore + 3, "floors are Level-neutral — they never add uses");
 SK_refreshNote();
 H.assert(/climbing: intermediate/.test(state.vars.GK.notes.SK), "note speaks the floored rank (the arbiter's channel)");
 state.vars.SK.skills.climbing.uses = 30;
 SK_renderCard(SK_cfg());
-H.assert(/- Climbing: Intermediate \(30\/50\)/.test(SC_get("Skills").entry),
-    "earned overtakes the floor — normal progress returns past the clamp");
+H.assert(/- Climbing: Advanced — Sophisticated or demanding tasks \(30 earned · 55\/100\)/.test(SC_get("Skills").entry),
+    "floor + earned: 25 + 30 = 55, Advanced (Volta: the start is a baseline, not a clamp)");
+H.assert(SK_rank("climbing") === "Advanced" && SK_ranks().climbing === "Advanced" && SK_ranks().lifting === "Intermediate",
+    "SK_rank and SK_ranks speak the same effective ranks, floored skills included");
 state.vars.SK.skills.climbing.uses = 3;
 SC_get("SkillKit Config").entry = SC_get("SkillKit Config").entry.replace("\n- Strong: rank=Intermediate, skills=climbing/lifting", "");
 SK_renderCard(SK_cfg());
-H.assert(!/- Lifting:/.test(SC_get("Skills").entry) && /- Climbing: Novice \(3\/10\)/.test(SC_get("Skills").entry),
+H.assert(!/- Lifting:/.test(SC_get("Skills").entry) && /- Climbing: Novice — .+ \(3\/10\)/.test(SC_get("Skills").entry),
     "delete the line and floors withdraw — reversible, only earned rank remains");
+
+// --- v0.3.0: benchmarks --------------------------------------------------------------
+H.assert(SK_benchmarks().generic.length === 8 && SK_benchmarks().generic[2] === "Ordinary tasks under normal conditions",
+    "Volta's eight generic benchmarks, verbatim");
+const logBefore = SC_get("Event Log").entry;
+SC_get("SkillKit Config").entry += "\n- Climbing: benchmarks=Steps and gentle slopes | Easy scrambles with abundant holds |  | Steep routes with limited holds"
+    + "\n- Juggling: benchmarks=a|b|c|d|e|f|g|h|i";
+const bmk = SK_benchmarks();
+H.assert(bmk.skills.climbing[0] === "Steps and gentle slopes" && bmk.skills.climbing[3] === "Steep routes with limited holds"
+    && bmk.skills.climbing[2] === "Ordinary tasks under normal conditions" && bmk.skills.climbing[7] === "At the limits of the setting",
+    "per-skill override: position by position, blanks and missing positions keep the generic");
+H.assert(!bmk.skills.juggling && /skipped malformed line: "- Juggling: benchmarks/.test(SC_get("Event Log").entry),
+    "more than eight benchmarks is malformed: reported, never thrown");
+H.assert(!/skipped malformed line: "Climbing: benchmarks/.test(SC_get("Event Log").entry.slice(logBefore.length)) && SK_attributes(SK_cfg()).names.length === 0,
+    "the attribute parser leaves benchmark lines alone");
+SK_renderCard(SK_cfg());
+H.assert(/- Climbing: Novice — Easy scrambles with abundant holds \(3\/10\)/.test(SC_get("Skills").entry),
+    "the card speaks the skill's own benchmark for the held rank");
+
+// --- v0.3.0: the practice band (code resolution) --------------------------------------
+// Held Novice (1): untrained..intermediate (0..3) teach (nothing sits two below a
+// Novice); a failure at advanced (4) is out of reach. Trivial and impossible never teach.
+SC_get("GateKit Config").entry = SC_get("GateKit Config").entry.replace("Resolution: model", "Resolution: code");
+const band = [["untrained", 1], ["novice", 1], ["apprentice", 1], ["intermediate", 1], ["advanced", 0], ["trivial", 0], ["impossible", 0]];
+band.forEach(function (b, i) {
+    const before = state.vars.SK.skills.climbing.uses;
+    // Novice held throughout: the uses stay below the Apprentice wall (3 -> 7).
+    ruling(60 + i, "You try route " + i, "skill=climbing; difficulty=" + b[0] + "; check=fail;");
+    H.assert(state.vars.SK.skills.climbing.uses - before === b[1],
+        "band at Novice: difficulty=" + b[0] + " earns " + b[1]);
+});
+ruling(70, "You try route 1", "skill=climbing; difficulty=novice; check=success;");
+ruling(71, "You try route 1", "skill=climbing; difficulty=novice; check=success;");
+H.assert(state.vars.SK.skills.climbing.uses === 8, "repeat guard holds under code resolution too (one of two)");
+
+// The lower edge (owner ruling 9/25: two below): an Advanced (4) swimmer learns from
+// apprentice (2) and intermediate (3) water, not from novice (1) — 96%+ odds teach nothing.
+state.vars.SK.skills.swimming = { uses: 50, tallyTurn: -1, lift: {}, lastPractice: "" };
+[["novice", 0], ["apprentice", 1], ["intermediate", 1], ["advanced", 1]].forEach(function (b, i) {
+    const before = state.vars.SK.skills.swimming.uses;
+    ruling(80 + i, "You swim channel " + i, "skill=swimming; difficulty=" + b[0] + "; check=success;");
+    H.assert(state.vars.SK.skills.swimming.uses - before === b[1], "lower edge at Advanced: difficulty=" + b[0] + " earns " + b[1]);
+});
+
+// GateKit x SkillKit: the table is built from SK_ranks, the scale from SK_benchmarks.
+H.turn(72, "do", H.doFrame("You climb")); H.resetCaches();
+GK_onInput(H.doFrame("You climb"));
+state.vars.GK.roll = 20;
+const joint = GK_onContext(H.ctx());
+H.assert(/untrained \(0\): No training\n/.test(joint) && /legendary \(7\): At the limits of the setting\n/.test(joint),
+    "the scale carries Volta's generic benchmarks, numbered");
+H.assert(/climbing — 0 Steps and gentle slopes; 1 Easy scrambles with abundant holds; 2 Ordinary tasks/.test(joint),
+    "per-skill benchmarks join the scale");
+H.assert(/- climbing: apprentice\n/.test(joint) && /- any other skill: novice\n/.test(joint),
+    "roll 20: climbing (Novice) clears apprentice (35% ≥ 20) — everyone else only novice");
+GK_onOutput("skill=climbing; difficulty=apprentice; check=success;\nYou top out.");
+H.assert(GK_lastCheck().skillRank === 1 && GK_lastCheck().compliant === true && GK_lastCheck().difficulty === "major",
+    "GateKit reads the held rank through SK_rank");
+
+// Above the band (owner ruling 9/25): a long shot that LANDS teaches; one that fails doesn't.
+let usesNow = state.vars.SK.skills.climbing.uses;          // 8 — still Novice
+ruling(73, "You free-climb the obsidian spire", "skill=climbing; difficulty=legendary; check=success;");
+H.assert(state.vars.SK.skills.climbing.uses === usesNow + 1, "a success six ranks up earns one practice");
+// (turn 73 crossed the Apprentice wall: held 2, so expert (5) is three up)
+ruling(74, "You leap for the far ledge", "skill=climbing; difficulty=expert; check=fail;");
+H.assert(state.vars.SK.skills.climbing.uses === usesNow + 1, "a failure three ranks up earns nothing");
+ruling(75, "You free-climb the obsidian spire", "skill=climbing; difficulty=legendary; check=success;");
+ruling(76, "You free-climb the obsidian spire", "skill=climbing; difficulty=legendary; check=success;");
+H.assert(state.vars.SK.skills.climbing.uses === usesNow + 1,
+    "the repeat guard still holds above the band (the uncounted failure didn't reset it)");
+SC_get("GateKit Config").entry = SC_get("GateKit Config").entry.replace("Resolution: code", "Resolution: model");
 
 H.summary("SkillKit");

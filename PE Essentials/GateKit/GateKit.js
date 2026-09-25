@@ -1,4 +1,24 @@
-// ===== GateKit v0.8.3 =====
+// ===== GateKit v0.9.0 =====
+// v0.9.0 — CODE RESOLUTION (owner rulings 9/25/2026 — Volta's Check, ported
+//  per the 9/23 feasibility study; Documentation/Design Proposals/Code
+//  Resolution - Design Proposal.md). A new config line, Resolution:
+//  model|code. MODEL (the default) is the d20 arbiter, byte-for-byte
+//  unchanged. CODE removes the judgment call from the check: the arbiter
+//  rates difficulty on the SKILL RANK LADDER (untrained..legendary, the
+//  same eight SkillKit holds), and the outcome is looked up. Code draws a
+//  percentile roll at input (retries reuse it) and hands the arbiter a
+//  per-skill SUCCESS TABLE ("climbing: expert" = succeeds at or below
+//  expert). Odds: 70% at an equal rank, halving per rank of gap (below:
+//  35/17.5/8.75…; above: 85/92.5/96.25…) — GK_chance(). No situational
+//  bonuses; binary success/fail. The model can't be blinded to the table
+//  in one generation, so compliance is MEASURED, not enforced: the check
+//  it wrote stands (the prose shows it), and `expected`/`compliant` ride
+//  lastCheck for the Event Log and ObserverKit. Consumers stay untouched:
+//  `difficulty` keeps the old vocabulary (at/below the held rank = minor,
+//  above = major; trivial/impossible pass through) and the rank rides new
+//  fields. Ranks and the benchmark scale come from SkillKit's public seams
+//  (SK_ranks, SK_rank, SK_benchmarks) when present; without SkillKit every
+//  skill resolves as untrained against the bare ladder (rule 7).
 // v0.8.3 — the OBSERVATORY SEAM (proposal veto ruling 2, 8/12/2026):
 //  GK_lastCheck() widens with `dialect` (skillFirst|bare|difficultyFirst|
 //  legacy) and `raw` (the verdict line as the model wrote it, 160 cap) —
@@ -79,6 +99,7 @@
 //   GK_markCommandTurn()  → stamp this turn non-adjudicable (bookkeeping)
 //   GK_isCommandTurn()    → is this turn stamped? (v0.8.2 — ask, don't peek)
 //   GK_setArbiterNote(owner, line) → one rendered line in the arbiter block (160 cap)
+//   GK_chance(skillRank, difficultyRank) → success odds 0..1 (v0.9.0, code resolution)
 // ---------------------------------------------------------------------------
 
 // Defaults. With ParaCard present these seed the editable "GateKit Config"
@@ -86,7 +107,8 @@
 const GK_SETTINGS = {
     ENABLED: true,              // the checker; LIVE — card edits apply next action
     REPORT: true,               // post rulings to the "Event Log" card (needs ParaCard)
-    SHOW_TOAST: false,          // state.message — NOT implemented on Phoenix UI
+    RESOLUTION: "model",        // model = the d20 arbiter decides; code = the success table decides (v0.9.0)
+    SHOW_TOAST: false,         // state.message — NOT implemented on Phoenix UI
     DEBUG_CONSOLE: true,        // mirror GK activity to the editor's CONSOLE LOG
     DEBUG_FOOTER: false         // GK_onOutputDebug appends a visible footer (playtesting)
 };
@@ -102,6 +124,84 @@ function GK_rollDie() {
     return GK_DIE_MIN + Math.floor(Math.random() * (GK_DIE_ROLL_MAX - GK_DIE_MIN + 1));
 }
 
+// --- Code resolution (v0.9.0) ----------------------------------------------------
+// The rank ladder, shared vocabulary with SkillKit (index = rank 0..7).
+const GK_RANKS = ["untrained", "novice", "apprentice", "intermediate", "advanced", "expert", "master", "legendary"];
+const GK_BASE_CHANCE = 0.7;     // success at an equal rank (owner ruling 9/25)
+
+// The half rule around 70%: each rank short halves success, each rank spare
+// halves failure. Monotonic in difficulty, which is what makes the table work.
+function GK_chance(skillRank, difficultyRank) {
+    const gap = Number(skillRank) - Number(difficultyRank);
+    return gap >= 0
+        ? 1 - (1 - GK_BASE_CHANCE) * Math.pow(0.5, gap)
+        : GK_BASE_CHANCE * Math.pow(0.5, -gap);
+}
+
+function GK_rollPercent() {
+    return Math.random() * 100;     // [0,100): success when roll < chance x 100
+}
+
+function GK_codeMode(cfg) {
+    return String((cfg || GK_cfg()).RESOLUTION || "").trim().toLowerCase() === "code";
+}
+
+// Rank index of a name on the ladder ("Expert" -> 5, "5" -> 5), else -1.
+function GK_rankIndex(word) {
+    const w = String(word == null ? "" : word).trim().toLowerCase();
+    if (/^[0-7]$/.test(w)) return Number(w);
+    return GK_RANKS.indexOf(w);
+}
+
+// The held rank of one skill, from SkillKit when present (else untrained).
+function GK_skillRank(skill) {
+    if (!skill || typeof SK_rank !== "function") return 0;
+    try { return Math.max(0, GK_rankIndex(SK_rank(skill))); } catch (e) { return 0; }
+}
+
+// The highest difficulty a roll still clears at a held rank; -1 = none.
+function GK_ceiling(rank, roll) {
+    let best = -1;
+    for (let d = 0; d < GK_RANKS.length; d++) if (roll < GK_chance(rank, d) * 100) best = d;
+    return best;
+}
+
+// The difficulty scale the arbiter rates against: SkillKit's benchmarks when
+// present (generic + per-skill), else the bare ladder.
+function GK_scaleLines() {
+    let bm = null;
+    if (typeof SK_benchmarks === "function") { try { bm = SK_benchmarks(); } catch (e) {} }
+    if (!bm || !Array.isArray(bm.generic) || bm.generic.length !== GK_RANKS.length) {
+        return [GK_RANKS.join(" < ")];
+    }
+    const lines = GK_RANKS.map((r, i) => r + " (" + i + "): " + bm.generic[i]);
+    const custom = bm.skills || {};
+    Object.keys(custom).sort().forEach(name => {
+        const b = custom[name];
+        if (Array.isArray(b) && b.length === GK_RANKS.length) {
+            lines.push(name + " — " + b.map((d, i) => i + " " + d).join("; "));
+        }
+    });
+    return lines;
+}
+
+// The success table for this roll: every ranked skill, then everyone else.
+function GK_tableLines(roll) {
+    const say = c => c < 0 ? "fails unless trivial" : GK_RANKS[c];
+    const rows = [];
+    if (typeof SK_ranks === "function") {
+        let held = {};
+        try { held = SK_ranks() || {}; } catch (e) {}
+        Object.keys(held)
+            .map(n => ({ n: n, r: Math.max(0, GK_rankIndex(held[n])) }))
+            .filter(x => x.r > 0)
+            .sort((a, b) => b.r - a.r || a.n.localeCompare(b.n))
+            .forEach(x => rows.push("- " + x.n + ": " + say(GK_ceiling(x.r, roll))));
+    }
+    rows.push("- any other skill: " + say(GK_ceiling(0, roll)));
+    return rows;
+}
+
 // The arbiter block. {{LUCK}} substituted at context time.
 const GK_PROMPT = [
     "<SYSTEM>",
@@ -115,10 +215,28 @@ const GK_PROMPT = [
     "</SYSTEM>"
 ].join("\n");
 
+// v0.9.0 — the code-resolution block. {{SCALE}} and {{TABLE}} substituted at
+// context time; notes ride after the table. The model rates, the table rules.
+const GK_PROMPT_CODE = [
+    "<SYSTEM>",
+    "You are the silent arbiter of player actions. Before narrating, rate how hard the player's most recent action is. The outcome is already decided by the table below: you rate the task, the table rules the result.",
+    "Rate difficulty as the skill rank the task demands under ordinary conditions, judged from the task alone:",
+    "{{SCALE}}",
+    "trivial = cannot fail. impossible = cannot succeed.",
+    "Outcome table. The check SUCCEEDS when the difficulty is at or below:",
+    "{{TABLE}}",
+    "Otherwise it FAILS.",
+    "First output EXACTLY one line — name the skill involved, THEN rate the difficulty, THEN the check the table gives, THEN any resource spent or restored:",
+    "skill=name; difficulty=trivial|" + GK_RANKS.join("|") + "|impossible; check=success|fail; resource=none|name -amount|name +amount;",
+    "Rules: rate the task, never the result you want. Use skill=none when no particular skill applies (it resolves as any other skill). resource: report a meaningful spend (-) or restore (+) of a resource listed in your notes (e.g. resource=stamina -6, or resource=health +10 when something heals you); otherwise resource=none.",
+    "Then continue the story, honoring the verdict.",
+    "</SYSTEM>"
+].join("\n");
+
 // Load canary: appears in Console Log / Script Test logs on EVERY hook run.
 // If you don't see this line, the Library isn't attached, saved, or executing.
 try {
-    if (GK_cfg().DEBUG_CONSOLE) log("[GateKit] library loaded (v0.8.1)");
+    if (GK_cfg().DEBUG_CONSOLE) log("[GateKit] library loaded (v0.9.0)");
 } catch (e) {}
 
 // Verdict line emitted by the model (v0.7.0 skill-first schema: the model
@@ -137,6 +255,16 @@ const GK_VERDICT_RX_BARE = /^\s*([a-z][a-z0-9 '\-]{0,40}?)\s*[;,]\s*(trivial|min
 const GK_VERDICT_RX_DFIRST = /^\s*difficulty\s*[=:]\s*(trivial|minor|major|impossible)\s*[;,]\s*check\s*[=:]\s*(success|partial|fail)\s*[;,]?\s*(?:skill\s*[=:]\s*([^;\n]+?)\s*[;,]?\s*)?$/im;
 // Legacy order (check-first), still accepted — models sometimes echo old context.
 const GK_VERDICT_RX_LEGACY = /^\s*check\s*[=:]\s*(success|partial|fail)\s*[;,]\s*difficulty\s*[=:]\s*(trivial|minor|major|impossible)\s*[;,]?\s*(?:skill\s*[=:]\s*([^;\n]+?)\s*[;,]?\s*)?$/im;
+
+// v0.9.0 — code resolution's dialects: the skill-first and bare layouts with
+// the rank ladder as difficulty (word or 0-7, an echoed "(n)" tolerated).
+// Tried FIRST in code mode only; model mode never sees them.
+const GK_CODE_DIFF = "(trivial|impossible|untrained|novice|apprentice|intermediate|advanced|expert|master|legendary|[0-7])(?:\\s*\\(\\s*[0-7]\\s*\\))?";
+const GK_CODE_TAIL = "\\s*[;,]?(?:\\s*resource\\s*[=:]\\s*([^;\\n]+?)\\s*[;,]?)?\\s*$";
+const GK_VERDICT_RX_CODE = new RegExp("^\\s*skill\\s*[=:]\\s*([^;\\n]+?)\\s*[;,]\\s*difficulty\\s*[=:]\\s*" + GK_CODE_DIFF
+    + "\\s*[;,]\\s*check\\s*[=:]\\s*(success|partial|fail)" + GK_CODE_TAIL, "im");
+const GK_VERDICT_RX_CODE_BARE = new RegExp("^\\s*([a-z][a-z0-9 '\\-]{0,40}?)\\s*[;,]\\s*" + GK_CODE_DIFF
+    + "\\s*[;,]\\s*(success|partial|fail)" + GK_CODE_TAIL, "im");
 
 // --- Live settings ---------------------------------------------------------------
 // The editable "GateKit Config" card when ParaCard is present, built-in
@@ -172,6 +300,7 @@ function GK_state() {
     const GK = state.vars.GK;
     if (typeof GK.luck !== "number") GK.luck = null;
     if (typeof GK.luckTurn !== "number") GK.luckTurn = -1;
+    if (typeof GK.roll !== "number") GK.roll = null;          // v0.9.0 percentile, drawn with luck
     if (typeof GK.commandTurn !== "number") GK.commandTurn = -1;
     if (!Object.prototype.hasOwnProperty.call(GK, "lastCheck")) GK.lastCheck = null;
     if (!Array.isArray(GK.log)) GK.log = [];
@@ -246,6 +375,7 @@ function GK_onInput(text) {
         const cfg = GK_cfg();
         GK.luckTurn = turn;
         GK.luck = GK_rollDie();
+        GK.roll = GK_rollPercent();     // v0.9.0: code resolution's draw, same once-per-action rule
         // v0.6.2, doctrine rule 11: projections exist from Turn 1 — the
         // Event Log materializes here, not on the first ruling post.
         if (cfg.REPORT && cfg.ENABLED && typeof SC_reportEnsure === "function") SC_reportEnsure();
@@ -272,19 +402,27 @@ function GK_onContext(text) {
 
     // Roll here too in case no input pass ran this action (safety net).
     const turn = GK_turn();
-    if (GK.luckTurn !== turn || GK.luck == null) {
+    if (GK.luckTurn !== turn || GK.luck == null || GK.roll == null) {
         GK.luckTurn = turn;
         GK.luck = GK_rollDie();
+        GK.roll = GK_rollPercent();
     }
 
-    let block = GK_PROMPT
-        .replace(/\{\{\s*LUCK\s*\}\}/gi, String(GK.luck));
-
-    // v0.7.1: extension notes ride the existing block, after the luck line —
-    // one arbiter voice, zero extra tail blocks (the note seam's contract).
     const noteKeys = Object.keys(GK.notes || {}).sort();
-    if (noteKeys.length) {
-        block = block.replace(/^(luck=.*)$/m, "$1\n" + noteKeys.map(k => GK.notes[k]).join("\n"));
+    const notes = noteKeys.map(k => GK.notes[k]).join("\n");
+    let block;
+    if (GK_codeMode(cfg)) {
+        // v0.9.0: the scale to rate against, the table that rules; notes after the table.
+        block = GK_PROMPT_CODE
+            .replace("{{SCALE}}", () => GK_scaleLines().join("\n"))    // creator text: no $-patterns
+            .replace("{{TABLE}}", () => GK_tableLines(GK.roll).join("\n"));
+        if (notes) block = block.replace(/^(Otherwise it FAILS\.)$/m, m0 => m0 + "\n" + notes);
+    } else {
+        block = GK_PROMPT
+            .replace(/\{\{\s*LUCK\s*\}\}/gi, String(GK.luck));
+        // v0.7.1: extension notes ride the existing block, after the luck line —
+        // one arbiter voice, zero extra tail blocks (the note seam's contract).
+        if (notes) block = block.replace(/^(luck=.*)$/m, "$1\n" + notes);
     }
 
     // Delivery-first capacity policy: the injection is the module's job.
@@ -329,8 +467,14 @@ function GK_onOutput(text) {
     let out = String(text || "");
     GK_DEBUG_RAW = out;
 
-    let m = out.match(GK_VERDICT_RX);            // v0.7 skill-first
-    let dialect = "skillFirst";
+    const code = GK_codeMode();
+    let m = null, dialect = "skillFirst", ranked = false;
+    if (code) {                                  // v0.9.0: the rank-ladder dialects first
+        m = out.match(GK_VERDICT_RX_CODE);
+        if (!m) { m = out.match(GK_VERDICT_RX_CODE_BARE); if (m) dialect = "bare"; }
+        ranked = !!m;
+    }
+    if (!m) { m = out.match(GK_VERDICT_RX); dialect = "skillFirst"; }          // v0.7 skill-first
     if (!m) { m = out.match(GK_VERDICT_RX_BARE); if (m) dialect = "bare"; }   // v0.8.1: skill-first group layout
     if (!m) { m = out.match(GK_VERDICT_RX_DFIRST); dialect = "difficultyFirst"; }
     if (!m) { m = out.match(GK_VERDICT_RX_LEGACY); dialect = "legacy"; }
@@ -341,7 +485,7 @@ function GK_onOutput(text) {
         const first = out.split("\n").find(l => l.trim()) || "";
         if (first.length < 160
             && /\b(difficulty|check|skill|resource)\s*[-=:]/i.test(first)
-            && /\b(trivial|minor|major|impossible|success|partial|fail)\b/i.test(first)) {
+            && /\b(trivial|minor|major|impossible|success|partial|fail|untrained|novice|apprentice|intermediate|advanced|expert|master|legendary)\b/i.test(first)) {
             GK_log("UNPARSED verdict-like line (add to parser): \"" + first.trim() + "\"");
             out = out.replace(first, "").replace(/\n{3,}/g, "\n\n").trim();
         }
@@ -350,11 +494,27 @@ function GK_onOutput(text) {
         // Per-dialect group mapping: skillFirst/bare = s/d/c, difficultyFirst = d/c/s, legacy = c/d/s
         const sfLayout = (dialect === "skillFirst" || dialect === "bare");   // bare shares the layout (v0.8.3)
         let result = (sfLayout ? m[3] : dialect === "legacy" ? m[1] : m[2]).toLowerCase();
-        const difficulty = (sfLayout ? m[2] : dialect === "legacy" ? m[2] : m[1]).toLowerCase();
+        let difficulty = (sfLayout ? m[2] : dialect === "legacy" ? m[2] : m[1]).toLowerCase();
         const rawSkill = sfLayout ? m[1] : m[3];
         // Normalize non-skills to null ("none", "n/a", "-", "null", "nothing")
         let skill = rawSkill ? rawSkill.trim().toLowerCase() : null;
         if (skill && /^(none|n\/a|na|null|nothing|-+)$/.test(skill)) skill = null;
+        // v0.9.0 code resolution: look the outcome up; the written check is
+        // measured against it, never overwritten (the prose already shows it).
+        let res = null;
+        if (ranked) {
+            res = { difficultyRank: null, difficultyIndex: null, skillRank: GK_skillRank(skill), chance: null, expected: null };
+            const di = GK_rankIndex(difficulty);
+            if (di >= 0) {
+                res.difficultyIndex = di;
+                res.difficultyRank = GK_RANKS[di];
+                res.chance = Math.round(GK_chance(res.skillRank, di) * 10000) / 10000;
+                res.expected = (GK.roll != null && GK.roll < res.chance * 100) ? "success" : "fail";
+                difficulty = di <= res.skillRank ? "minor" : "major";   // consumers keep the old vocabulary
+            } else {
+                res.expected = difficulty === "impossible" ? "fail" : "success";   // trivial / impossible
+            }
+        }
         // Deterministic backstop for contradictory rulings (seen live: success/impossible)
         if (difficulty === "impossible" && result !== "fail") {
             GK_log("coerced contradictory ruling " + result + "/impossible -> fail/impossible");
@@ -378,16 +538,25 @@ function GK_onOutput(text) {
             skill: skill,
             resource: resource,
             resourceDelta: resourceDelta,
-            luck: GK.luck,
+            luck: code ? null : GK.luck,             // code mode: the model never saw a d20
             dialect: dialect,                        // parse metadata (v0.8.3, the Observatory's seam)
             raw: m[0].trim().slice(0, 160),          // the verdict line as the model wrote it
-            turn: GK_turn()
+            turn: GK_turn(),
+            resolution: res ? "code" : "model"       // v0.9.0
         };
+        if (res) {
+            Object.assign(GK.lastCheck, res, {
+                roll: GK.roll == null ? null : Math.round(GK.roll * 100) / 100,
+                compliant: result === res.expected
+            });
+            if (!GK.lastCheck.compliant) GK_log("table said " + res.expected + ", arbiter wrote " + result);
+        }
         out = out.replace(m[0], "").replace(/\n{3,}/g, "\n\n").trim();
         if (GK_cfg().SHOW_TOAST) {
             state.message = "Check: " + GK.lastCheck.difficulty + "/" + GK.lastCheck.result;
         }
-        GK_log("difficulty=" + GK.lastCheck.difficulty + " check=" + GK.lastCheck.result + " luck=" + GK.luck);
+        GK_log("difficulty=" + (res && res.difficultyRank ? res.difficultyRank : GK.lastCheck.difficulty) + " check=" + GK.lastCheck.result
+            + (res ? " roll=" + GK.lastCheck.roll + (res.chance != null ? " chance=" + res.chance : "") : " luck=" + GK.luck));
     }
 
     // Event Log — the player-facing event log (ParaCard's SC_report).
@@ -401,12 +570,18 @@ function GK_onOutput(text) {
             if (GK.commandTurn === GK_turn()) {
                 SC_report("GateKit", "bookkeeping turn — not judged");
             } else if (playerTurn && m) {
-                SC_report("GateKit", "ruling: " + GK.lastCheck.difficulty + " difficulty → "
-                    + GK.lastCheck.result
-                    + (GK.lastCheck.skill ? " (" + GK.lastCheck.skill + ")" : "")
-                    + (GK.lastCheck.resource ? " · " + GK.lastCheck.resource + " "
-                        + (GK.lastCheck.resourceDelta > 0 ? "+" : "") + GK.lastCheck.resourceDelta : "")
-                    + " · luck " + (GK.luck == null ? "-" : GK.luck));
+                const c = GK.lastCheck;
+                const coded = c.resolution === "code";
+                const shown = coded && c.difficultyRank ? c.difficultyRank : c.difficulty;
+                SC_report("GateKit", "ruling: " + shown + " difficulty → "
+                    + c.result
+                    + (c.skill ? " (" + c.skill + (coded ? ", " + GK_RANKS[c.skillRank] : "") + ")" : "")
+                    + (c.resource ? " · " + c.resource + " "
+                        + (c.resourceDelta > 0 ? "+" : "") + c.resourceDelta : "")
+                    + (coded
+                        ? (c.chance != null ? " · " + Math.round(c.chance * 1000) / 10 + "% · rolled " + (Math.round(c.roll * 10) / 10) : "")
+                            + (c.compliant ? "" : " · the table said " + c.expected)
+                        : " · luck " + (GK.luck == null ? "-" : GK.luck)));
             } else if (playerTurn) {
                 SC_report("GateKit", "no ruling captured · luck " + (GK.luck == null ? "-" : GK.luck));
             }
@@ -432,9 +607,12 @@ function GK_onOutputDebug(text) {
         const firstLine = (String(raw).split("\n").find(l => l.trim()) || "").slice(0, 100);
         const summary = "checker: " + (cfg.ENABLED ? "ON" : "OFF")
             + " | turn: " + turn
-            + " | luck: " + (GK.luck == null ? "-" : GK.luck)
+            + (GK_codeMode(cfg)
+                ? " | roll: " + (GK.roll == null ? "-" : Math.round(GK.roll * 10) / 10)
+                : " | luck: " + (GK.luck == null ? "-" : GK.luck))
             + " | verdict this turn: " + (hit
-                ? c.difficulty + "/" + c.result + (c.skill ? "/" + c.skill : "")
+                ? (c.difficultyRank || c.difficulty) + "/" + c.result + (c.skill ? "/" + c.skill : "")
+                    + (c.resolution === "code" && !c.compliant ? " (table said " + c.expected + ")" : "")
                 : "NONE CAPTURED");
         if (cfg.DEBUG_CONSOLE) {
             try {

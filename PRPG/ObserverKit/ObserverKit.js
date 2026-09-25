@@ -1,4 +1,12 @@
-// ===== ObserverKit v0.1.2 =====
+// ===== ObserverKit v0.1.3 =====
+// v0.1.3 — the CODE-RESOLUTION FIELDS (GateKit v0.9.0, 9/25/2026): when a
+//  ruling was resolved by the success table, the record also carries
+//  dx (difficulty rank 0-7, null for trivial/impossible), roll (the
+//  percentile draw), p (the odds), ex (what the table said) and ok (did the
+//  arbiter write it). Two questions the playthrough answers: the compliance
+//  rate (ok), and whether the arbiter's difficulty tracks the roll it could
+//  see (dx vs roll should be independent — the gaming falsifier). Additive;
+//  model-resolved records are unchanged.
 // v0.1.2 — the WOUND FIELD (the Wound Reread's instrument, 8/13/2026):
 //  records carry `wnd` = {f: frame, t: tier, v: vetoed, s: span} from
 //  TK_lastWound(), so the parser's real false-positive and miss rates can be
@@ -187,6 +195,10 @@ function OB_onOutput(text) {
             retry: 0
         };
         if (typeof SK_rank === "function" && rec.sk) { try { rec.rank = SK_rank(rec.sk); } catch (e) {} }
+        if (c && c.resolution === "code") {         // v0.1.3: the success table's receipt
+            rec.dx = (typeof c.difficultyIndex === "number") ? c.difficultyIndex : null;
+            rec.roll = c.roll; rec.p = c.chance; rec.ex = c.expected; rec.ok = c.compliant;
+        }
         if (OB.tag) rec.cell = OB.tag;
         if (OB.maxTurn > turn) rec.replay = true;   // the story rewound past this turn once (v0.1.1)
         try { if (typeof Date !== "undefined" && Date.now) rec.ms = Date.now(); } catch (e) {}   // probe P5 rides feature-detection
@@ -219,4 +231,4 @@ function OB_flush(out) {
 }
 
 // Load canary
-try { if (typeof log === "function") log("[ObserverKit] library loaded (v0.1.1)"); } catch (e) {}
+try { if (typeof log === "function") log("[ObserverKit] library loaded (v0.1.3)"); } catch (e) {}

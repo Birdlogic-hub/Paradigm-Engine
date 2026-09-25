@@ -1,4 +1,31 @@
-// ===== SkillKit v0.2.2 =====
+// ===== SkillKit v0.3.0 =====
+// v0.3.0 — VOLTA'S LADDER (owner rulings 9/25/2026, with GateKit v0.9.0's
+//  code resolution; Documentation/Design Proposals/Code Resolution -
+//  Design Proposal.md). Same eight names, same thresholds; four rules
+//  change, all Volta's (Game Dev/Volta, skills.gd):
+//  (1) BENCHMARKS — every rank carries a competence description (Volta's
+//      generic eight, verbatim) and a creator may override them per skill
+//      with a config custom line: "- Climbing: benchmarks=Steps and gentle
+//      slopes | Easy scrambles | ..." (up to eight, blanks keep the generic).
+//      The Skills card shows the held rank's benchmark; GateKit's code mode
+//      rates difficulty against them (seam SK_benchmarks()).
+//  (2) START + PRACTICE — an attribute floor is now a BASELINE, not a
+//      clamp: effective = floor + earned (was max). An Intermediate-floored
+//      skill with 30 earned sits at 55 (Advanced). Floors stay Level-neutral.
+//  (3) +1 PER ATTEMPT — success no longer counts double; every counted
+//      attempt earns one practice, success or failure.
+//  (4) THE PRACTICE BAND — under code resolution a ruling earns practice
+//      when its difficulty sits from rank-2 up to rank+2, win or lose
+//      (owner rulings 9/25, widening Volta's rank..rank+2). Its real job is
+//      the lower edge: tasks three or more ranks below (96%+ odds) teach
+//      nothing — the anti-grind. Above the band a SUCCESS still teaches (the
+//      long shot that lands is the lesson); failures out of reach don't. Model
+//      resolution has no rank-ladder difficulty, so doubt-teaches (minor/
+//      major) stays its rule. Plus Volta's REPEAT GUARD, both modes: the
+//      same skill, difficulty and action as this skill's last practice
+//      earns nothing (a modest guard, not a complete anti-farming system).
+//  New seams: SK_ranks() (every held rank, for GateKit's success table) and
+//  SK_benchmarks(). SK_rank() now canonicalizes the name the way tallies do.
 // v0.2.2 — SK_rank(name) public seam (the Observatory, 8/12/2026): the
 //  effective (floored) rank held for one skill, as the arbiter sees it.
 //  ObserverKit is the first consumer; read-only, never throws.
@@ -90,18 +117,26 @@ const SK_SETTINGS = {
     STATS: false                // lift table on the Skills card (tester channel)
 };
 
-// uses → rank. Thresholds are cumulative uses; success counts double
-// (doing teaches; succeeding teaches more).
+// uses → rank. Thresholds are cumulative practice; one per counted attempt
+// (v0.3.0 — Volta's rule: success no longer counts double).
 const SK_RANKS = [
     ["Untrained", 0], ["Novice", 1], ["Apprentice", 10], ["Intermediate", 25],
     ["Advanced", 50], ["Expert", 100], ["Master", 250], ["Legendary", 1000]
 ];
+// v0.3.0 — Volta's generic competence benchmarks, one per rank, verbatim.
+const SK_BENCHMARKS = [
+    "No training", "Crude tasks with time and suitable tools", "Ordinary tasks under normal conditions",
+    "Well-made or moderately demanding tasks", "Sophisticated or demanding tasks",
+    "Exceptional conventional tasks", "Extraordinary precision or complexity", "At the limits of the setting"
+];
+const SK_BAND = 2;              // any result teaches up to rank+2; above it, successes only (code resolution)
+const SK_BAND_BELOW = 2;        // tasks down to rank-2 still teach (85-92.5% odds); easier ones don't (owner ruling 9/25)
 const SK_NOTE_CAP = 160;
 const SK_NOTE_OWNER = "SK";
 
 // Load canary
 try {
-    if (typeof log === "function") log("[SkillKit] library loaded (v0.2.2)");
+    if (typeof log === "function") log("[SkillKit] library loaded (v0.3.0)");
 } catch (e) {}
 
 // Live settings. Uncached on purpose: SkillKit runs once per turn (one
@@ -111,10 +146,12 @@ function SK_cfg() {
         try {
             return SC_config("SkillKit Config", SK_SETTINGS, {
                 description: "Settings for SkillKit (the Skill). Skills grow from doing: "
-                    + "every GateKit ruling tallies its skill. Starting Skills is a floor, "
-                    + "applied once per named skill (Climbing=Intermediate, ...). Ranks are "
-                    + "semantic — the arbiter sees them; luck stays pure chance. Stats "
-                    + "shows the telemetry lift table on the Skills card."
+                    + "each contested GateKit ruling earns its skill one practice. Starting "
+                    + "Skills is a floor, applied once per named skill (Climbing=Intermediate, "
+                    + "...). Custom lines: \"- Strong: rank=Intermediate, skills=climbing/lifting\" "
+                    + "(an attribute baseline) and \"- Climbing: benchmarks=a | b | ...\" (up to "
+                    + "eight rank descriptions for one skill). Stats shows the telemetry lift "
+                    + "table on the Skills card."
             });
         } catch (e) {}
     }
@@ -225,6 +262,7 @@ function SK_attributes(cfg) {
         const body = line.replace(/^-\s*/, "");
         const colon = body.indexOf(":");
         if (colon === -1) { SK_complain(cfg, body); continue; }
+        if (/^\s*benchmarks\s*[=:]/i.test(body.slice(colon + 1))) continue;   // v0.3.0: SK_benchmarks' line
         const attr = body.slice(0, colon).trim();
         let rank = "", skills = [];
         const parts = body.slice(colon + 1).split(",");
@@ -247,27 +285,68 @@ function SK_attributes(cfg) {
     return out;
 }
 
-// name -> effective uses (earned clamped up by any floor), tracked ∪ floored.
+// name -> effective uses, tracked ∪ floored. v0.3.0 (Volta's start +
+// practice): an attribute floor is a baseline, earned practice adds on top.
 function SK_effective(attrs) {
     const SK = SK_state();
     const eff = {};
-    for (const n in SK.skills) eff[n] = Math.max(SK.skills[n].uses || 0, attrs.floors[n] || 0);
+    for (const n in SK.skills) eff[n] = (SK.skills[n].uses || 0) + (attrs.floors[n] || 0);
     for (const n in attrs.floors) if (!(n in eff)) eff[n] = attrs.floors[n];
     return eff;
 }
 
 // Public seam (v0.2.2, the Observatory): the EFFECTIVE rank currently held
-// for one skill — earned uses clamped up by any attribute/starting floor,
-// exactly the rank the arbiter is shown. Unknown or absent skills read
-// "Untrained"; never throws.
+// for one skill — floor baseline plus earned practice, exactly the rank the
+// arbiter is shown. v0.3.0: the name is canonicalized as tallies are, so
+// "Lock-Picking!" finds lock-picking. Unknown skills read "Untrained";
+// never throws.
 function SK_rank(name) {
     try {
-        const k = String(name || "").trim().toLowerCase();
+        const k = SK_canon(name);
         if (!k) return SK_RANKS[0][0];
         const attrs = SK_attributes(SK_cfg());
         const rec = SK_state().skills[k];
-        return SK_rankFor(Math.max(rec ? (rec.uses || 0) : 0, attrs.floors[k] || 0));
+        return SK_rankFor((rec ? (rec.uses || 0) : 0) + (attrs.floors[k] || 0));
     } catch (e) { return SK_RANKS[0][0]; }
+}
+
+// Public seam (v0.3.0): every held rank above nothing, name -> rank name —
+// GateKit's code mode builds its success table from this.
+function SK_ranks() {
+    const out = {};
+    try {
+        const eff = SK_effective(SK_attributes(SK_cfg()));
+        for (const n in eff) out[n] = SK_rankFor(eff[n]);
+    } catch (e) {}
+    return out;
+}
+
+function SK_rankIndex(rankName) {
+    const want = String(rankName || "").toLowerCase();
+    for (let i = 0; i < SK_RANKS.length; i++) if (SK_RANKS[i][0].toLowerCase() === want) return i;
+    return 0;
+}
+
+// Public seam (v0.3.0): the competence benchmarks — Volta's generic eight
+// plus per-skill overrides from "- Name: benchmarks=a | b | ..." config
+// lines (position by position; blanks keep the generic). {generic, skills}.
+function SK_benchmarks() {
+    const out = { generic: SK_BENCHMARKS.slice(), skills: {} };
+    try {
+        if (typeof SC_get !== "function") return out;
+        const card = SC_get("SkillKit Config");
+        if (!card) return out;
+        const lines = String(card.entry || "").split("\n");
+        for (let i = 0; i < lines.length; i++) {
+            const m = lines[i].trim().match(/^-\s*([^:]+?)\s*:\s*benchmarks\s*[=:]\s*(.*)$/i);
+            if (!m) continue;
+            const name = SK_canon(m[1]);
+            const parts = m[2].split("|").map(s => s.trim());
+            if (!name || parts.length > SK_BENCHMARKS.length) { SK_complain(SK_cfg(), lines[i].trim()); continue; }
+            out.skills[name] = SK_BENCHMARKS.map((g, j) => parts[j] ? parts[j] : g);
+        }
+    } catch (e) {}
+    return out;
 }
 
 function SK_record(name) {
@@ -279,6 +358,7 @@ function SK_record(name) {
     if (typeof r.uses !== "number") r.uses = 0;
     if (typeof r.tallyTurn !== "number") r.tallyTurn = -1;
     if (!r.lift || typeof r.lift !== "object") r.lift = {};
+    if (typeof r.lastPractice !== "string") r.lastPractice = "";   // v0.3.0 repeat guard
     return r;
 }
 
@@ -381,17 +461,19 @@ function SK_renderCard(cfg, attrs) {
     const names = Object.keys(eff).sort(function (x, y) {
         return eff[y] - eff[x] || x.localeCompare(y);
     });
+    const bm = SK_benchmarks();
     const lines = [];
     for (let i = 0; i < names.length; i++) {
         const uses = (SK.skills[names[i]] ? SK.skills[names[i]].uses : 0) || 0;
         const fl = a.floors[names[i]] || 0;
-        let line = "- " + SK_pretty(names[i]) + ": " + SK_rankFor(eff[names[i]]);
+        const rank = SK_rankFor(eff[names[i]]);
+        // v0.3.0: the held rank speaks as its benchmark (per-skill override first)
+        const says = (bm.skills[names[i]] || bm.generic)[SK_rankIndex(rank)];
+        let line = "- " + SK_pretty(names[i]) + ": " + rank + " — " + says;
         if (cfg.SHOW_PROGRESS) {
-            if (fl > uses) line += " (" + uses + " earned)";      // floored: earned shown honestly
-            else {
-                const next = SK_nextThreshold(uses);
-                line += next ? " (" + uses + "/" + next + ")" : " (" + uses + ")";
-            }
+            const next = SK_nextThreshold(eff[names[i]]);
+            const tally = next ? eff[names[i]] + "/" + next : String(eff[names[i]]);
+            line += fl ? " (" + uses + " earned · " + tally + ")" : " (" + tally + ")";   // floored: earned shown honestly
         }
         lines.push(line);
     }
@@ -443,28 +525,46 @@ function SK_onOutput(text) {
             let c = null;
             try { c = GK_lastCheck(); } catch (e) {}
             // Doubt teaches: only luck-swayed difficulties accrue (v0.1.2).
-            if (c && c.turn === turn && c.skill
-                && (c.difficulty === "minor" || c.difficulty === "major")) {
-                const name = SK_canon(c.skill);
-                if (name) {
-                    SK.tallyTurn = turn;
-                    const rec = SK_record(name);
-                    const fl = attrs.floors[name] || 0;      // v0.2.0: the arbiter saw the FLOORED rank
-                    const before = SK_rankFor(Math.max(rec.uses, fl));
-                    const heldRank = before.toLowerCase();   // effective rank HELD AT ATTEMPT (lift key)
-                    rec.uses += (c.result === "success") ? 2 : 1;
-                    rec.tallyTurn = turn;
-                    const bucket = rec.lift[heldRank] || (rec.lift[heldRank] = { s: 0, f: 0, p: 0 });
-                    if (c.result === "success") bucket.s++;
-                    else if (c.result === "partial") bucket.p++;
-                    else bucket.f++;
-                    changed = true;
-                    const after = SK_rankFor(Math.max(rec.uses, fl));
-                    if (after !== before && cfg.REPORT && typeof SC_report === "function") {
-                        try { SC_report("SkillKit", name + ": " + before + " → " + after); } catch (e) {}
-                    }
-                    SK_evict(cfg, name);
+            // Code resolution (v0.3.0): the practice band decides instead.
+            const name = (c && c.turn === turn && c.skill) ? SK_canon(c.skill) : "";
+            const fl = name ? (attrs.floors[name] || 0) : 0;
+            const held = name ? SK_rankIndex(SK_rankFor((SK.skills[name] ? SK.skills[name].uses || 0 : 0) + fl)) : 0;
+            let counts = false;
+            if (name && c.resolution === "code") {
+                counts = typeof c.difficultyIndex === "number" && c.difficultyIndex >= held - SK_BAND_BELOW
+                    && (c.difficultyIndex <= held + SK_BAND || c.result === "success");   // long shots that land teach
+            } else if (name) {
+                counts = c.difficulty === "minor" || c.difficulty === "major";
+            }
+            // Volta's repeat guard: same skill, difficulty and action as this
+            // skill's last practice earns nothing.
+            let sig = "";
+            if (counts) {
+                let act = "";
+                try { const h = history && history[history.length - 1]; act = h ? String(h.text || "") : ""; } catch (e) {}
+                sig = [c.difficultyIndex != null ? c.difficultyIndex : c.difficulty,
+                    act.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()].join("|");
+                if (SK.skills[name] && SK.skills[name].lastPractice === sig) counts = false;
+            }
+            if (counts) {
+                SK.tallyTurn = turn;
+                const rec = SK_record(name);
+                // v0.2.0: the arbiter saw the FLOORED rank; v0.3.0: floor + earned
+                const before = SK_rankFor(rec.uses + fl);
+                const heldRank = before.toLowerCase();   // effective rank HELD AT ATTEMPT (lift key)
+                rec.uses += 1;                           // v0.3.0: one practice per attempt
+                rec.lastPractice = sig;
+                rec.tallyTurn = turn;
+                const bucket = rec.lift[heldRank] || (rec.lift[heldRank] = { s: 0, f: 0, p: 0 });
+                if (c.result === "success") bucket.s++;
+                else if (c.result === "partial") bucket.p++;
+                else bucket.f++;
+                changed = true;
+                const after = SK_rankFor(rec.uses + fl);
+                if (after !== before && cfg.REPORT && typeof SC_report === "function") {
+                    try { SC_report("SkillKit", name + ": " + before + " → " + after); } catch (e) {}
                 }
+                SK_evict(cfg, name);
             }
         }
         // v0.2.0: the Level announce — once per level, dips (eviction) silent.

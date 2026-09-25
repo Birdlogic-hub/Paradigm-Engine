@@ -1,4 +1,11 @@
-# GateKit v0.8.2 — the Check primitive
+# GateKit v0.9.0 — the Check primitive
+
+**v0.9.0 — code resolution (opt-in).** A new config line, `Resolution: model|code`. `model` (the default) is the d20 arbiter, unchanged. With `Resolution: code`:
+- The arbiter rates difficulty on the skill-rank ladder: `trivial | untrained | novice | apprentice | intermediate | advanced | expert | master | legendary | impossible`, against SkillKit's benchmarks when SkillKit is pasted.
+- The engine rolls a hidden percentile and hands the arbiter a per-skill success table, e.g. `- climbing: expert` means the check succeeds at or below expert.
+- Odds are 70% when the skill's rank equals the task's, halving per rank of gap: 35% / 17.5% short, 85% / 92.5% spare. No situational bonuses, and success or fail only.
+- The Event Log shows the odds and the roll, and reports when the arbiter wrote a result the table didn't give. The written check stands, and the mismatch is recorded for ObserverKit.
+- Design record: `Documentation/Design Proposals/Code Resolution - Design Proposal.md`.
 
 **v0.6.1 — reports to the Event Log.** Each judged turn posts a player-readable line to ParaCard's "Event Log" card (`[GateKit] ruling: major difficulty → partial (leaping) · luck 68`), including honest "no ruling captured" and "bookkeeping turn" entries. Live **Report** switch in the config card; no ParaCard, no post, no throw.
 

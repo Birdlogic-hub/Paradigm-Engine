@@ -7,7 +7,7 @@ eval(H.load("RegexLib", "CardLib", "GateKit", "InventoryKit", "SkillKit", "Rewin
 
 // One full turn through the wired chain, RW FIRST everywhere (the tabs' law).
 function turn(n, input, modelOut) {
-    H.turn(n, "do"); H.resetCaches();
+    H.turn(n, "do", input); H.resetCaches();   // the action is in history by output (SkillKit's repeat guard reads it)
     let t = RW_onInput(input);
     t = INV_onInput(t); t = GK_onInput(t); t = OB_onInput(t);
     let c = RW_onContext(H.ctx()); c = GK_onContext(c); OB_onContext(c);
@@ -18,7 +18,7 @@ function turn(n, input, modelOut) {
 
 // --- Setup: the 8/13 evening, reconstructed --------------------------------------------
 turn(2, H.doFrame("You survey the guardroom"), "skill=perception; difficulty=minor; check=success;\nStone and rain.");
-H.assert(state.vars.SK.skills.perception.uses === 2, "setup: perception tallied at T2");
+H.assert(state.vars.SK.skills.perception.uses === 1, "setup: perception tallied at T2 (one practice, SkillKit v0.3.0)");
 turn(4, H.doFrame("You listen at the gate"), "skill=perception; difficulty=trivial; check=success;\nScrape... clang.");
 turn(6, H.doFrame("/take coil of rope"), "difficulty=trivial; check=success;\nGathered.");
 turn(8, H.doFrame("/collect 12 silver coins"), "difficulty=trivial; check=success;\nJingle.");
@@ -34,7 +34,7 @@ H.assert(/\[Rewind\]/.test(SC_get("Event Log").entry) && /story erased back to t
     "the restore is reported to the Event Log");
 H.assert(GK_lastCheck().turn === 8 && GK_lastCheck().skill === "perception",
     "the replayed T8 carries the FRESH ruling — the dead turn 8's verdict is gone (the collision, dead)");
-H.assert(state.vars.SK.skills.perception.uses === 4,
+H.assert(state.vars.SK.skills.perception.uses === 2,
     "SkillKit tallies the replayed ruling — restored tallyTurn no longer suppresses it");
 H.assert(INV_walletGet("silver coins") === 0 && INV_count("coil of rope") === 1,
     "the ledger is the pre-T8 present: dead collect AND dead undo both never happened; T6's rope survives");
