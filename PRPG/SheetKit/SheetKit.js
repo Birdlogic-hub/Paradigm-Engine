@@ -1,4 +1,17 @@
-// ===== SheetKit v0.1.3 =====
+// ===== SheetKit v0.1.4 =====
+// v0.1.4 (owner, 10/7, first FDE playtest): the Attributes line leaves the
+//  Sheet (the Skills card's family lines already carry it); so does the
+//  epithet ("a green adventurer" — it reaches the arbiter through SkillKit's
+//  note, so on the Sheet it was a duplicate in context); and Level gains its
+//  progress toward the next Level, in rank points (SkillKit v0.4.0's Skyrim
+//  formula, read through SK_levelState) — numbers only (owner: a block-glyph
+//  bar rendered as a smudge in AID's font):
+//    Level 1 — 2/3 toward 2
+//  Nothing at the cap. Without SK_levelState, the line is just "Level N".
+//  FIX (live, 10/7): the Sheet's always-on trigger (".") is now HEALED every
+//  render. A Sheet created first by someone else — a pre-made scenario card
+//  with blank triggers, or FDE's turn-0 fill — kept its own keys, because
+//  SC_ensure sets keys only on create, and the Sheet fell out of context.
 // v0.1.3 — the RACK, on the Sheet (owner ruling, 8/10/2026): equipment gets
 //  its own "## Equipment" SECTION at the foot of the engine block — the
 //  visibility the owner first asked of the Inventory card (that version was
@@ -24,7 +37,7 @@
 //  threshold overrides. The rule line "-----" separates player's half
 //  from engine's half; everything above it is theirs.
 // Namespace: CS. Consumes public seams only: SC_render/SC_get (CardLib),
-//  SK_level/SK_epithet/SK_attributes/SK_cfg (SkillKit), TK_readGauges
+//  SK_level/SK_levelState (SkillKit), TK_readGauges
 //  (TrackerKit v0.3.1). All optional — rule 7 throughout. TrackerKit and
 //  SkillKit yield their card surfaces on `typeof CS_onOutput` presence.
 
@@ -32,7 +45,7 @@ const CS_TITLE = "Character Sheet";
 const CS_FIELDS = ["Name", "Gender", "Pronouns", "Appearance", "Background"];
 const CS_RULE = "-----";
 
-if (typeof log === "function") log("[SheetKit] library loaded (v0.1.3)");
+if (typeof log === "function") log("[SheetKit] library loaded (v0.1.4)");
 
 // The semantic layer: quartile phrases per preset, pinned overrides at the floor.
 const CS_PHRASES = {
@@ -82,12 +95,14 @@ function CS_render() {
     if (typeof SK_level === "function") {
         try {
             let line = "Level " + SK_level();
-            if (typeof SK_epithet === "function") line += " (" + SK_epithet() + ")";
-            eng.push(line);
-            if (typeof SK_attributes === "function" && typeof SK_cfg === "function") {
-                const a = SK_attributes(SK_cfg());
-                if (a.names.length) eng.push("Attributes: " + a.names.join(", "));
+            // v0.1.4: no epithet here — it reaches the arbiter through SkillKit's
+            // note (in GateKit's block); on the Sheet it was a duplicate.
+            // Progress toward the next Level (none at the cap)
+            if (typeof SK_levelState === "function") {
+                const ls = SK_levelState();
+                if (ls.cost > 0) line += " — " + ls.into + "/" + ls.cost + " toward " + (ls.level + 1);
             }
+            eng.push(line);
         } catch (e) {}
     }
     // The Rack (v0.1.3): gear as a dedicated section at the engine block's
@@ -119,10 +134,16 @@ function CS_render() {
     const entry = "# " + CS_TITLE + "\n" + identity.join("\n") + "\n\n" + CS_RULE
         + (eng.length ? "\n" + eng.join("\n") : "")
         + (gear.length ? "\n\n## Equipment\n" + gear.join("\n") : "");
-    SC_render(CS_TITLE, entry, {
+    const always = (typeof SC_ALWAYS_ON !== "undefined") ? SC_ALWAYS_ON : ".";
+    const card = SC_render(CS_TITLE, entry, {
         type: (typeof SC_TYPE_GAMEPLAY !== "undefined") ? SC_TYPE_GAMEPLAY : "Gameplay",
-        keys: (typeof SC_ALWAYS_ON !== "undefined") ? SC_ALWAYS_ON : CS_TITLE
+        keys: always
     });
+    // v0.1.4: HEAL the trigger every render (InventoryKit's pattern). SC_ensure
+    // sets keys only when it creates a card, so a Sheet made first by anyone
+    // else — a scenario's pre-made card with blank triggers, or FDE's turn-0
+    // fill — kept its own keys and fell out of context (live, 10/7).
+    if (card && card.keys !== always) card.keys = always;
 }
 
 // Rule 11: the Sheet exists from Turn 1 (input pass); refreshed after the

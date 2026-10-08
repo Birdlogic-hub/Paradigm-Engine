@@ -11,12 +11,19 @@ TK_onInput(H.doFrame("You look around"));
 CS_onInput(H.doFrame("You look around"));
 H.assert(!!sheet(), "Character Sheet materializes on Turn 1");
 H.assert(sheet().keys === SC_ALWAYS_ON, "always-on keys (owner ruling 2)");
+sheet().keys = "Character Sheet";     // the live 10/7 bug: a Sheet created first by someone else, its own keys
+CS_onInput("");
+H.assert(sheet().keys === SC_ALWAYS_ON, "the always-on trigger is HEALED every render (SC_ensure sets keys only on create)");
+sheet().keys = "";                    // a pre-made scenario Sheet with blank triggers
+CS_onInput("");
+H.assert(sheet().keys === SC_ALWAYS_ON, "…blank triggers included (the pre-made Sheet's 'the engine sets them' promise, kept)");
 H.assert(sheet().type === "Gameplay", "Gameplay banner");
 H.assert(!SC_get("Trackers"), "the Trackers card retires when the Sheet is present (owner ruling 5)");
 for (const f of ["Name:", "Gender:", "Pronouns:", "Appearance:", "Background:"]) {
     H.assert(new RegExp("^" + f + "$", "m").test(sheet().entry), "blank field ships: " + f);
 }
-H.assert(/^Level 1 \(a green adventurer\)$/m.test(sheet().entry), "Level line lives on the Sheet");
+H.assert(/^Level 1 — 0\/3 toward 2$/m.test(sheet().entry), "Level line lives on the Sheet, with progress toward the next (v0.1.4)");
+H.assert(!/adventurer|legend/.test(sheet().entry), "no epithet on the Sheet (v0.1.4) — SkillKit's arbiter note carries it");
 H.assert(/^Health: 100\/100 \(fine\)\nYou are unhurt and steady\.$/m.test(sheet().entry),
     "gauge line + the semantic layer beneath it (owner ruling, §4.5)");
 H.assert(/^Stamina: 100\/100\nYou feel fresh\.$/m.test(sheet().entry), "unbanded preset speaks its quartile phrase");
@@ -35,11 +42,11 @@ H.assert(/^A scar crosses her left brow$/m.test(sheet().entry), "extra identity 
 H.assert(/^Gender:$/m.test(sheet().entry), "blank stays blank — the engine never invents an identity");
 
 // --- Engine block refreshes without touching identity --------------------------------
-state.vars.SK.skills = { climbing: { uses: 30, tallyTurn: -1, lift: {} } };   // total 30 → Level 2
+state.vars.SK.skills = { climbing: { uses: 75, tallyTurn: -1, lift: {} } };   // Intermediate earned: 1+2 = 3 points (rank − 1) → Level 2, 0/4 toward 3
 state.vars.TK.trackers.health.val = 45;
 CS_onOutput("The day wears on.");
 H.assert(/^Name: Kira$/m.test(sheet().entry), "identity untouched by engine refresh");
-H.assert(/^Level 2 \(a green adventurer\)$/m.test(sheet().entry), "Level line tracks the ledger");
+H.assert(/^Level 2 — 0\/4 toward 3$/m.test(sheet().entry), "Level line and its progress track the ledger");
 H.assert(/^Health: 45\/105 \(wounded\)\nYou are badly wounded\.$/m.test(sheet().entry),
     "wounded quartile speaks its phrase — and the max is 105: the Growth scaling composed in unasked");
 TK_apply("health", -999, "test: the fall");            // ARRIVAL at the floor pins the event
@@ -53,7 +60,14 @@ SC_get("Trackers Config").entry += "\n- Morale: start=6, range=0-6, bands=shaken
 H.turn(3, "do"); H.resetCaches();
 TK_onInput(H.doFrame("You march"));
 CS_onOutput("The road unrolls.");
-H.assert(/^Attributes: Strong$/m.test(sheet().entry), "attribute names surface on the Sheet");
+H.assert(!/^Attributes:/m.test(sheet().entry), "no Attributes line on the Sheet (v0.1.4) — the Skills card carries the families");
+state.vars.SK.skills = { a: { uses: 1000, tallyTurn: -1, lift: {} } };
+for (let i = 0; i < 10; i++) state.vars.SK.skills["b" + i] = { uses: 1000, tallyTurn: -1, lift: {} };   // 11 Legendary skills x 21 = 231 >= 228
+CS_onOutput("Legend.");
+H.assert(/^Level 20$/m.test(sheet().entry), "no bar at the cap");
+SK_refreshNote();
+H.assert(/^player \(a living legend\)/.test(state.vars.GK.notes.SK), "…while the epithet still reaches the arbiter through SkillKit's note");
+state.vars.SK.skills = { climbing: { uses: 75, tallyTurn: -1, lift: {} } };
 H.assert(/^Morale: 6\/6 \(steady\)\nYour morale reads steady\.$/m.test(sheet().entry), "banded custom speaks its band plainly");
 H.assert(/^Doom: 0\/6$/m.test(sheet().entry) && !/Your doom/.test(sheet().entry), "unbanded custom stays numeric — no invented register");
 

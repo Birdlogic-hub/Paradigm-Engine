@@ -2101,7 +2101,42 @@ function INV_onOutput(text) {
     return out;
 }
 
-// ===== SkillKit v0.3.1 =====
+// ===== SkillKit v0.4.1 =====
+// v0.4.1 — THE CARD SLIMS (owner, 10/7, first live playtest): the Warrior's
+//  Skills card read 675 on the editor's /1000 counter on turn 0 (1,000 is AID's
+//  soft limit, 2,000 the hard one — owner) — eight lines, five of them one attribute's
+//  synonyms, each carrying benchmark text. Now (1) benchmark text is OFF the card (it still feeds GateKit's
+//  scale via SK_benchmarks); (2) floored skills with no XP FOLD under their
+//  attribute — "- Martial (Intermediate): blades, combat, fighting, melee,
+//  swordplay" — and get their own line once practised. SK_attributes() also
+//  returns `groups` (additive). MAX SKILLS 12 -> 25 (owner, 10/7): the
+//  vocabulary is the model's, open-ended; the cap only bounds how many are
+//  KEPT, and eviction now costs Level points. THE THRESHOLDS RE-PACED (owner, 10/7):
+//  Novice 1, Apprentice 25, Intermediate 75, Advanced 150, Expert 250,
+//  Master 500, Legendary 1000. LEVEL POINTS = RANK − 1 (owner, 10/7):
+//  Novice 0 (one success buys it, so trying many things once could buy
+//  Levels), Apprentice 1, Intermediate 2 ... Legendary 6; 21 per skill.
+//  SK_levelState() → {level, into, cost} is now
+//  a PUBLIC seam: SheetKit v0.1.4 shows Level progress from it.
+// v0.4.0 — XP BY DIFFICULTY + SKYRIM LEVELS (owner rulings 10/5/2026;
+//  Documentation/Design Proposals/Code Resolution - Design Proposal.md §8).
+//  Under code resolution the PRACTICE BAND IS GONE. A SUCCESS pays XP by the
+//  task's difficulty, doubling per rank — untrained/novice 1, apprentice 2,
+//  intermediate 4, advanced 8, expert 16, master 32, legendary 64 — uncapped
+//  (a long shot that lands pays its full value). FAILURES PAY NOTHING; trivial
+//  and impossible pay nothing. The thresholds stand: practising at your own
+//  rank takes ~7-10 successes per rank (Legendary ~24), where the flat +1 had
+//  made Expert->Master 150. Easy tasks still pay, but trivially at high rank
+//  (1 XP against a 750 gap) — the anti-grind the band's lower edge did, now
+//  for free. The repeat guard stays. Lift (telemetry) records the successes
+//  that paid; ObserverKit carries every outcome. Model resolution unchanged:
+//  +1 per minor/major attempt.
+//  LEVEL comes from SKILL RANKS, Skyrim-style: every EARNED rank gives Level
+//  points by the new rank (since v0.4.1: Novice 0, Apprentice 1 ...
+//  Legendary 6); Level L->L+1 costs L+2 points (Level 20 = 228).
+//  Head starts are Level-neutral: attribute floors and Starting Skills set the
+//  baseline the points are counted from (Starting Skills record their grant in
+//  rec.granted). Still derived, never stored — erases and evictions follow.
 // v0.3.1 — the note under code resolution (veto ⚑7, 9/25): when GateKit's
 //  Resolution is code (GK_resolution(), GateKit v0.9.1) the arbiter note
 //  is the epithet alone — "player (a green adventurer)" — because the success
@@ -2120,6 +2155,8 @@ function INV_onOutput(text) {
 //  (2) START + PRACTICE — an attribute floor is now a BASELINE, not a
 //      clamp: effective = floor + earned (was max). An Intermediate-floored
 //      skill with 30 earned sits at 55 (Advanced). Floors stay Level-neutral.
+//  [(3) and (4) under code resolution SUPERSEDED by v0.4.0: XP by difficulty,
+//   successes only, no band. Model resolution keeps (3).]
 //  (3) +1 PER ATTEMPT — success no longer counts double; every counted
 //      attempt earns one practice, success or failure.
 //  (4) THE PRACTICE BAND — under code resolution a ruling earns practice
@@ -2219,17 +2256,19 @@ const SK_SETTINGS = {
     ENABLED: true,              // the module; LIVE — card edits apply next action
     PROGRESSION: true,          // accrual on/off (ranks freeze when false)
     STARTING_SKILLS: "(none)",  // floor, applied once per skill: Climbing=Intermediate, ...
-    MAX_SKILLS: 12,             // tracked-skill cap (least-used evicted, reported)
+    MAX_SKILLS: 25,             // tracked-skill cap (least-used evicted, reported); 25 since v0.4.1 (owner, 10/7)
     REPORT: true,               // rank-ups + evictions to the Event Log
     SHOW_PROGRESS: true,        // numeric progress toward next rank on the Skills card (player-only)
     STATS: false                // lift table on the Skills card (tester channel)
 };
 
-// uses → rank. Thresholds are cumulative practice; one per counted attempt
-// (v0.3.0 — Volta's rule: success no longer counts double).
+// uses → rank. Thresholds are cumulative XP: one per counted attempt under
+// model resolution; by difficulty, successes only, under code resolution (v0.4.0).
+// v0.4.1 — the owner's re-pace (10/7): 1/25/75/150/250/500/1000 (was
+// 1/10/25/50/100/250/1000). Legendary stays the lifetime mark.
 const SK_RANKS = [
-    ["Untrained", 0], ["Novice", 1], ["Apprentice", 10], ["Intermediate", 25],
-    ["Advanced", 50], ["Expert", 100], ["Master", 250], ["Legendary", 1000]
+    ["Untrained", 0], ["Novice", 1], ["Apprentice", 25], ["Intermediate", 75],
+    ["Advanced", 150], ["Expert", 250], ["Master", 500], ["Legendary", 1000]
 ];
 // v0.3.0 — Volta's generic competence benchmarks, one per rank, verbatim.
 const SK_BENCHMARKS = [
@@ -2237,14 +2276,14 @@ const SK_BENCHMARKS = [
     "Well-made or moderately demanding tasks", "Sophisticated or demanding tasks",
     "Exceptional conventional tasks", "Extraordinary precision or complexity", "At the limits of the setting"
 ];
-const SK_BAND = 2;              // any result teaches up to rank+2; above it, successes only (code resolution)
-const SK_BAND_BELOW = 2;        // tasks down to rank-2 still teach (85-92.5% odds); easier ones don't (owner ruling 9/25)
+// v0.4.0 — XP a code-resolved SUCCESS pays, by difficulty rank (doubling).
+const SK_XP = [1, 1, 2, 4, 8, 16, 32, 64];
 const SK_NOTE_CAP = 160;
 const SK_NOTE_OWNER = "SK";
 
 // Load canary
 try {
-    if (typeof log === "function") log("[SkillKit] library loaded (v0.3.1)");
+    if (typeof log === "function") log("[SkillKit] library loaded (v0.4.1)");
 } catch (e) {}
 
 // Live settings. Uncached on purpose: SkillKit runs once per turn (one
@@ -2254,7 +2293,8 @@ function SK_cfg() {
         try {
             return SC_config("SkillKit Config", SK_SETTINGS, {
                 description: "Settings for SkillKit (the Skill). Skills grow from doing: "
-                    + "each contested GateKit ruling earns its skill one practice. Starting "
+                    + "under code resolution a success pays XP by its difficulty (1, 2, 4 ... 64); "
+                    + "otherwise each contested ruling earns one. Skill ranks drive your Level. Starting "
                     + "Skills is a floor, applied once per named skill (Climbing=Intermediate, "
                     + "...). Custom lines: \"- Strong: rank=Intermediate, skills=climbing/lifting\" "
                     + "(an attribute baseline) and \"- Climbing: benchmarks=a | b | ...\" (up to "
@@ -2318,9 +2358,9 @@ function SK_nextThreshold(uses) {
     return 0;
 }
 
-// --- the Growth (v0.2.0) ---------------------------------------------------------
-// Level: derived, never stored. Total = every contested tally there is.
-const SK_LEVEL_WALL = 25;
+// --- the Growth (v0.2.0; Level from ranks since v0.4.0) ----------------------------
+// Level: derived, never stored. v0.4.0 — Skyrim-style: earned skill ranks are
+// worth points (the new rank's number), and Level L->L+1 costs L+2 of them.
 const SK_LEVEL_CAP = 20;
 const SK_EPITHETS = [
     [20, "a living legend"], [18, "a renowned adventurer"], [15, "an elite adventurer"],
@@ -2328,6 +2368,7 @@ const SK_EPITHETS = [
     [3, "a tested adventurer"], [1, "a green adventurer"]
 ];
 
+// Public seam: total XP in the ledger (no longer what Level counts).
 function SK_total() {
     const SK = SK_state();
     let t = 0;
@@ -2335,9 +2376,42 @@ function SK_total() {
     return t;
 }
 
-// Public seam — TrackerKit scales preset maxima on this.
+// Level points (v0.4.0): for every skill, the ranks EARNED above its head
+// start, each worth its number minus one — Novice 0, Apprentice 1 ...
+// Legendary 6 (v0.4.1, owner, 10/7). The head start
+// (attribute floor + Starting Skills grant) is the baseline, Level-neutral.
+function SK_levelPoints() {
+    let pts = 0;
+    try {
+        const SK = SK_state();
+        const attrs = SK_attributes(SK_cfg());
+        const names = {};
+        for (const n in SK.skills) names[n] = true;
+        for (const n in attrs.floors) names[n] = true;
+        for (const n in names) {
+            const rec = SK.skills[n];
+            const fl = attrs.floors[n] || 0;
+            const base = SK_rankIndex(SK_rankFor((rec ? rec.granted || 0 : 0) + fl));
+            const held = SK_rankIndex(SK_rankFor((rec ? rec.uses || 0 : 0) + fl));
+            // A rank is worth its number minus one (owner, 10/7): Novice 0 (one
+            // success buys it), Apprentice 1 ... Legendary 6.
+            for (let i = base + 1; i <= held; i++) pts += i - 1;
+        }
+    } catch (e) {}
+    return pts;
+}
+
+// Level from points: L->L+1 costs L+2. Returns {level, into, cost} — `into`
+// points banked toward the next Level, `cost` its price (0 at the cap).
+function SK_levelState() {
+    let pts = SK_levelPoints(), lv = 1;
+    while (lv < SK_LEVEL_CAP && pts >= lv + 2) { pts -= lv + 2; lv++; }
+    return { level: lv, into: lv < SK_LEVEL_CAP ? pts : 0, cost: lv < SK_LEVEL_CAP ? lv + 2 : 0 };
+}
+
+// Public seam — TrackerKit scales preset maxima on this; the Sheet shows it.
 function SK_level() {
-    return Math.min(SK_LEVEL_CAP, 1 + Math.floor(SK_total() / SK_LEVEL_WALL));
+    return SK_levelState().level;
 }
 
 // Public seam — the Character Sheet's spoken rank; the note's prefix.
@@ -2359,7 +2433,7 @@ function SK_complain(cfg, line) {
 // "- Strong: rank=Intermediate, skills=climbing/lifting/melee" — a floor is a
 // derivation clamp, not a grant: max(earned, floor), Level-neutral, reversible.
 function SK_attributes(cfg) {
-    const out = { floors: {}, names: [] };
+    const out = { floors: {}, names: [], groups: [] };   // v0.4.1: groups = the families, for the card's fold
     if (typeof SC_get !== "function") return out;
     const card = SC_get("SkillKit Config");
     if (!card) return out;
@@ -2386,6 +2460,7 @@ function SK_attributes(cfg) {
             SK_complain(cfg, body + " (unknown rank \"" + rank + "\")"); continue;
         }
         out.names.push(attr);
+        out.groups.push({ name: attr, rank: SK_rankFor(floorUses), uses: floorUses, skills: skills });
         for (let j = 0; j < skills.length; j++) {
             out.floors[skills[j]] = Math.max(out.floors[skills[j]] || 0, floorUses);
         }
@@ -2499,6 +2574,7 @@ function SK_applyFloor(cfg) {
         const floorUses = SK_usesFor(kv.value);
         const rec = SK_record(name);
         if (rec.uses < floorUses) { rec.uses = floorUses; changed = true; }
+        rec.granted = Math.max(rec.granted || 0, floorUses);   // v0.4.0: the head start Level counts from
     }
     return changed;
 }
@@ -2576,15 +2652,27 @@ function SK_renderCard(cfg, attrs) {
     const names = Object.keys(eff).sort(function (x, y) {
         return eff[y] - eff[x] || x.localeCompare(y);
     });
-    const bm = SK_benchmarks();
+    // v0.4.1 (owner, 10/7 live playtest): a floored skill with no XP yet is
+    // FOLDED under the attribute that floors it — one line per family, not one
+    // per synonym — and gets its own line once it earns XP. Benchmark text is
+    // off the card: it feeds GateKit's scale. (AID's card entries: 1,000
+    // soft limit, 2,000 hard; a 25-skill card measures ~800-850.)
+    const folded = {};                                   // skill -> index into a.groups
+    for (let g = 0; g < a.groups.length; g++) {
+        const grp = a.groups[g];
+        for (let j = 0; j < grp.skills.length; j++) {
+            const s = grp.skills[j], rec = SK.skills[s];
+            if (rec && rec.uses) continue;               // practised: its own line
+            if ((a.floors[s] || 0) !== grp.uses) continue;   // a stronger attribute owns it
+            if (!(s in folded)) folded[s] = g;
+        }
+    }
     const lines = [];
     for (let i = 0; i < names.length; i++) {
+        if (names[i] in folded) continue;
         const uses = (SK.skills[names[i]] ? SK.skills[names[i]].uses : 0) || 0;
         const fl = a.floors[names[i]] || 0;
-        const rank = SK_rankFor(eff[names[i]]);
-        // v0.3.0: the held rank speaks as its benchmark (per-skill override first)
-        const says = (bm.skills[names[i]] || bm.generic)[SK_rankIndex(rank)];
-        let line = "- " + SK_pretty(names[i]) + ": " + rank + " — " + says;
+        let line = "- " + SK_pretty(names[i]) + ": " + SK_rankFor(eff[names[i]]);
         if (cfg.SHOW_PROGRESS) {
             const next = SK_nextThreshold(eff[names[i]]);
             const tally = next ? eff[names[i]] + "/" + next : String(eff[names[i]]);
@@ -2592,13 +2680,24 @@ function SK_renderCard(cfg, attrs) {
         }
         lines.push(line);
     }
+    for (let g = 0; g < a.groups.length; g++) {
+        const members = a.groups[g].skills.filter(s => folded[s] === g);
+        if (!members.length) continue;
+        let line = "- " + a.groups[g].name + " (" + a.groups[g].rank + "): " + members.join(", ");
+        if (cfg.SHOW_PROGRESS) {                     // folded members share one rank and one tally
+            const at = a.groups[g].uses, next = SK_nextThreshold(at);
+            line += " (0 earned · " + (next ? at + "/" + next : String(at)) + ")";
+        }
+        lines.push(line);
+    }
     // v0.2.0 header; v0.2.1: MIGRATED to the Character Sheet when present.
     let head = "";
     if (typeof CS_onOutput !== "function") {
-        const lv = SK_level();
+        const ls = SK_levelState();
+        const lv = ls.level;
         head = "Level " + lv + " (" + SK_epithet() + ")";
         if (lv < SK_LEVEL_CAP) {
-            head += " — " + (SK_total() - (lv - 1) * SK_LEVEL_WALL) + "/" + SK_LEVEL_WALL + " toward " + (lv + 1);
+            head += " — " + ls.into + "/" + ls.cost + " toward " + (lv + 1);   // v0.4.0: rank points
         }
         if (a.names.length) head += "\nAttributes: " + a.names.join(", ");
         head += "\n";
@@ -2640,16 +2739,17 @@ function SK_onOutput(text) {
             let c = null;
             try { c = GK_lastCheck(); } catch (e) {}
             // Doubt teaches: only luck-swayed difficulties accrue (v0.1.2).
-            // Code resolution (v0.3.0): the practice band decides instead.
+            // Code resolution (v0.4.0): a SUCCESS pays XP by its difficulty;
+            // failures, trivial and impossible pay nothing.
             const name = (c && c.turn === turn && c.skill) ? SK_canon(c.skill) : "";
             const fl = name ? (attrs.floors[name] || 0) : 0;
-            const held = name ? SK_rankIndex(SK_rankFor((SK.skills[name] ? SK.skills[name].uses || 0 : 0) + fl)) : 0;
-            let counts = false;
+            let counts = false, xp = 0;
             if (name && c.resolution === "code") {
-                counts = typeof c.difficultyIndex === "number" && c.difficultyIndex >= held - SK_BAND_BELOW
-                    && (c.difficultyIndex <= held + SK_BAND || c.result === "success");   // long shots that land teach
+                counts = typeof c.difficultyIndex === "number" && c.result === "success";
+                if (counts) xp = SK_XP[c.difficultyIndex] || 1;
             } else if (name) {
                 counts = c.difficulty === "minor" || c.difficulty === "major";
+                xp = 1;
             }
             // Volta's repeat guard: same skill, difficulty and action as this
             // skill's last practice earns nothing.
@@ -2667,7 +2767,7 @@ function SK_onOutput(text) {
                 // v0.2.0: the arbiter saw the FLOORED rank; v0.3.0: floor + earned
                 const before = SK_rankFor(rec.uses + fl);
                 const heldRank = before.toLowerCase();   // effective rank HELD AT ATTEMPT (lift key)
-                rec.uses += 1;                           // v0.3.0: one practice per attempt
+                rec.uses += xp;                          // v0.4.0: by difficulty (code) / one (model)
                 rec.lastPractice = sig;
                 rec.tallyTurn = turn;
                 const bucket = rec.lift[heldRank] || (rec.lift[heldRank] = { s: 0, f: 0, p: 0 });
@@ -3772,7 +3872,20 @@ function EV_onOutput(text) {
     } catch (e) { return String(text || ""); }
 }
 
-// ===== SheetKit v0.1.3 =====
+// ===== SheetKit v0.1.4 =====
+// v0.1.4 (owner, 10/7, first FDE playtest): the Attributes line leaves the
+//  Sheet (the Skills card's family lines already carry it); so does the
+//  epithet ("a green adventurer" — it reaches the arbiter through SkillKit's
+//  note, so on the Sheet it was a duplicate in context); and Level gains its
+//  progress toward the next Level, in rank points (SkillKit v0.4.0's Skyrim
+//  formula, read through SK_levelState) — numbers only (owner: a block-glyph
+//  bar rendered as a smudge in AID's font):
+//    Level 1 — 2/3 toward 2
+//  Nothing at the cap. Without SK_levelState, the line is just "Level N".
+//  FIX (live, 10/7): the Sheet's always-on trigger (".") is now HEALED every
+//  render. A Sheet created first by someone else — a pre-made scenario card
+//  with blank triggers, or FDE's turn-0 fill — kept its own keys, because
+//  SC_ensure sets keys only on create, and the Sheet fell out of context.
 // v0.1.3 — the RACK, on the Sheet (owner ruling, 8/10/2026): equipment gets
 //  its own "## Equipment" SECTION at the foot of the engine block — the
 //  visibility the owner first asked of the Inventory card (that version was
@@ -3798,7 +3911,7 @@ function EV_onOutput(text) {
 //  threshold overrides. The rule line "-----" separates player's half
 //  from engine's half; everything above it is theirs.
 // Namespace: CS. Consumes public seams only: SC_render/SC_get (CardLib),
-//  SK_level/SK_epithet/SK_attributes/SK_cfg (SkillKit), TK_readGauges
+//  SK_level/SK_levelState (SkillKit), TK_readGauges
 //  (TrackerKit v0.3.1). All optional — rule 7 throughout. TrackerKit and
 //  SkillKit yield their card surfaces on `typeof CS_onOutput` presence.
 
@@ -3806,7 +3919,7 @@ const CS_TITLE = "Character Sheet";
 const CS_FIELDS = ["Name", "Gender", "Pronouns", "Appearance", "Background"];
 const CS_RULE = "-----";
 
-if (typeof log === "function") log("[SheetKit] library loaded (v0.1.3)");
+if (typeof log === "function") log("[SheetKit] library loaded (v0.1.4)");
 
 // The semantic layer: quartile phrases per preset, pinned overrides at the floor.
 const CS_PHRASES = {
@@ -3856,12 +3969,14 @@ function CS_render() {
     if (typeof SK_level === "function") {
         try {
             let line = "Level " + SK_level();
-            if (typeof SK_epithet === "function") line += " (" + SK_epithet() + ")";
-            eng.push(line);
-            if (typeof SK_attributes === "function" && typeof SK_cfg === "function") {
-                const a = SK_attributes(SK_cfg());
-                if (a.names.length) eng.push("Attributes: " + a.names.join(", "));
+            // v0.1.4: no epithet here — it reaches the arbiter through SkillKit's
+            // note (in GateKit's block); on the Sheet it was a duplicate.
+            // Progress toward the next Level (none at the cap)
+            if (typeof SK_levelState === "function") {
+                const ls = SK_levelState();
+                if (ls.cost > 0) line += " — " + ls.into + "/" + ls.cost + " toward " + (ls.level + 1);
             }
+            eng.push(line);
         } catch (e) {}
     }
     // The Rack (v0.1.3): gear as a dedicated section at the engine block's
@@ -3893,10 +4008,16 @@ function CS_render() {
     const entry = "# " + CS_TITLE + "\n" + identity.join("\n") + "\n\n" + CS_RULE
         + (eng.length ? "\n" + eng.join("\n") : "")
         + (gear.length ? "\n\n## Equipment\n" + gear.join("\n") : "");
-    SC_render(CS_TITLE, entry, {
+    const always = (typeof SC_ALWAYS_ON !== "undefined") ? SC_ALWAYS_ON : ".";
+    const card = SC_render(CS_TITLE, entry, {
         type: (typeof SC_TYPE_GAMEPLAY !== "undefined") ? SC_TYPE_GAMEPLAY : "Gameplay",
-        keys: (typeof SC_ALWAYS_ON !== "undefined") ? SC_ALWAYS_ON : CS_TITLE
+        keys: always
     });
+    // v0.1.4: HEAL the trigger every render (InventoryKit's pattern). SC_ensure
+    // sets keys only when it creates a card, so a Sheet made first by anyone
+    // else — a scenario's pre-made card with blank triggers, or FDE's turn-0
+    // fill — kept its own keys and fell out of context (live, 10/7).
+    if (card && card.keys !== always) card.keys = always;
 }
 
 // Rule 11: the Sheet exists from Turn 1 (input pass); refreshed after the

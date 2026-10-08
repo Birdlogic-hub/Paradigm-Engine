@@ -35,7 +35,7 @@ H.assert(typeof rec.ch === "string" && rec.ch.length > 0 && rec.cl > 0, "context
 H.assert(/^Up you go/.test(rec.nh), "narration head captured post-strip");
 
 // --- Rank is HELD AT ATTEMPT: a threshold-crossing success records the old rank --------
-state.vars.SK.skills.climbing.uses = 9;                    // Novice, one success from Apprentice
+state.vars.SK.skills.climbing.uses = 24;                   // Novice, one success from Apprentice (25)
 r = play(3, H.doFrame("You climb the cliff"), "skill=climbing; difficulty=major; check=success;\nHigher.");
 rec = OB_ring()[OB_ring().length - 1];
 H.assert(rec.rank === "Novice" && SK_rank("climbing") === "Apprentice",
