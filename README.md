@@ -5,9 +5,9 @@
 One repo, two shippable packages — each is a single Library-tab paste plus three hook tabs, ready to drop into an AI Dungeon scenario:
 
 - **[`PE Essentials/`](PE%20Essentials/)** — the standard install: adjudication (GateKit), inventory, cards, parsing, and the Rewind. Paste `PE Essentials - Library.js` + its three hook tabs. *(The folder also builds `PE Characters - Library.js`, the character-stack variant bundling third-party guests — see `THIRD_PARTY_LICENSES.md`.)*
-- **[`PRPG/`](PRPG/)** — **Paradigm RPG**, the full RPG layer: everything in Essentials plus skills, gauges, random events, the character sheet, and telemetry. Paste `PRPG - Library.js` + its three hook tabs. Its README is the complete player's guide.
+- **[`PRPG/`](PRPG/)** — **Paradigm RPG**, the full RPG layer: everything in Essentials plus skills and Levels, gauges, random events, the character sheet, and telemetry. Paste `PRPG - Library.js` + its three hook tabs. Its README is the complete player's guide.
 
-Tests run from either package folder (`node test\run.js` in PE Essentials; `node test\<suite>.test.js` in PRPG) — one clone is everything. Regenerate bundles with each folder's `make-bundle.js`.
+Tests run from either package folder (`node test\run.js` in both) — one clone is everything. Regenerate bundles with each folder's `make-bundle.js`.
 
 ## The `/` commands
 
@@ -56,13 +56,13 @@ Don't have the item yet? `/equip rusty dagger as weapon` takes *and* equips it i
 
 **Scenario creators**: the Inventory Config card's `Starting Items` and `Starting Wallet` lines stock a new adventure on turn 1 — `2 field ration; iron dagger; leather jerkin as armor` — so armor can be worn from the first breath rather than carried. Paired with SkillKit's `Starting Skills`, that's character archetypes with zero scripting; the full walkthrough is in the [starting kit guide](PRPG/README.md#starting-kit-for-scenario-creators).
 
-Skills have **no commands** — they grow from doing (every ruling tallies its skill; trivial and impossible teach nothing). Full detail, cards, and config reference: the [Paradigm RPG player's guide](PRPG/README.md).
+Skills have **no commands** — they grow from doing. Every ruling names a skill, any skill the model likes, and earns it XP; trivial and impossible teach nothing. Ranks you earn add up to your Level. Full detail, cards, and config reference: the [Paradigm RPG player's guide](PRPG/README.md).
 
 ---
 
 A modular engine within AID, built from shared primitives. Each module generalizes an **idea** proven somewhere in the old projects — never the old implementation itself. Legacy projects are source material (bones), not consumers: nothing here exists to retrofit them, and they stay frozen as-is.
 
-**PE Essentials Package** (defined 7/13/2026): **RegexLib + CardLib + GateKit + InventoryKit** — the four-module bundle that ships together as the engine's standard install. Every module still stands alone as a single file and degrades gracefully when its collaborators are absent; Essentials is the recommended full stack, not a hard dependency.
+**PE Essentials Package** (defined 7/13/2026): **RegexLib + CardLib + GateKit + InventoryKit**, joined by **RewindKit** on 8/13 — the bundle that ships together as the engine's standard install. Every module still stands alone as a single file and degrades gracefully when its collaborators are absent; Essentials is the recommended full stack, not a hard dependency.
 
 ## The modules
 
@@ -70,13 +70,15 @@ A modular engine within AID, built from shared primitives. Each module generaliz
 |---|---|---|---|
 | **RegexLib/** | **The Grammar** — player text is hostile and nouns are arbitrary, so the grammar is data: injected candidate lists define the language. Framing scrub, slash commands, longest-first boundary-safe matching, amount ergonomics. | SIS parsing layer (EB), the "crown jewel" | **v0.1.1** ✔ · **ESSENTIALS** |
 | **CardLib/** | **The Projection** — gameplay state lives in `state.vars`; cards are pure renderings, never parsed back. Config cards (player edits, code reads) are the sanctioned exception. **v0.2: the Codex** — cards materialize from an index when their subject enters the story. **v0.3: the Event Log** — rolling engine log, newest first (20 events under a 990-char budget as of v0.4.4). **v0.4: the two banners** — Gameplay (cards you read) / Settings (cards you edit). | SIS, RESR's Condition card; AC's config card; PMD's Pokédex registry | **v0.4.4** ✔ · **ESSENTIALS** |
-| **GateKit/** | **The Check** — the model judges what code can't: whether an action is consistent with the story. One question at the strongest context position, one machine-readable ruling, captured as engine state. | Silent DM (concept); SIS/RESR/PMD gates were instances | **v0.8.2** — v0.4.5 LIVE-PROVEN ✔ · **ESSENTIALS** |
-| **InventoryKit/** | **The Possession** — what the player holds, held honestly: bookkeeping deterministic, consequences adjudicated. Per-verb arbitration policy (none/outcome/gated). **v0.2: the Loadout** — equipment as possession with a worn flag. | SIS core; Cragin's policy idea | **v0.2.0** — harness-passed · **ESSENTIALS** |
+| **GateKit/** | **The Check** — the model judges what code can't: whether an action is consistent with the story. One question at the strongest context position, one machine-readable ruling, captured as engine state. **v0.9: code resolution** (opt-in) — the model rates difficulty on the skill ladder and a pre-rolled success table decides the outcome: 70% at an equal rank, halving per rank of gap. | Silent DM (concept); SIS/RESR/PMD gates were instances; Volta's Check | **v0.9.2** — v0.4.5 LIVE-PROVEN ✔ · **ESSENTIALS** |
+| **InventoryKit/** | **The Possession** — what the player holds, held honestly: bookkeeping deterministic, consequences adjudicated. Per-verb arbitration policy (none/outcome/gated). **v0.2: the Loadout** — equipment as possession with a worn flag; the Kit stocks new adventures. | SIS core; Cragin's policy idea | **v0.2.7** — harness-passed · **ESSENTIALS** |
+| **RewindKit/** | **The Rewind** — Erase a turn and the engine's state follows the story back: per-turn snapshots, restored on erase. | The 8/13 erase-and-replay log | **v0.1.0** — harness-passed · **ESSENTIALS** |
 | **BridgeKit/** | **The Truce** — third-party shim: the Check yields on guests' special turns (IS task, AC generation, LC thought, SAE control), and new characters get walked around the room (the Introduction). | Inner Self / Auto-Cards / Living Characters / SlowBurn compat studies | **v0.8.1** — AC yield LIVE-PROVEN ✔ · **PE CHARACTERS** |
-| **SkillKit/** | **The Skill** — the Check already names the skill behind every ruling (`skill=`); SkillKit remembers what you're good at. Ranks are semantic and reach the arbiter as words, never as `GK_setLuck`. **v0.2: the Growth** — Level derived from total contested accrual, plus attribute floors. | TAS's skill-learning (prior art); Dice's salvaged seam | **v0.2.1** — v0.1.x LIVE-PROVEN ✔ · **PRPG** |
-| **TrackerKit/** | **The Gauge** — creator-declared gauges with per-resource physics: the Wound (prose), the Cost (the ruling's `resource=`), the Clock (drift). Absorbed ResourceKit 7/16. | RESR's meters (EB), FD's detectHurt, TAS | **v0.3.2** — v0.2.x LIVE-PROVEN ✔ · **PRPG** |
-| **SheetKit/** | **The Sheet** — the Trackers card evolved: identity player-authored above the rule line, engine projection below, every number translated by the Semantic Layer. | FD's character card (layout comb) | **v0.1.1** — harness-passed · **PRPG** |
+| **SkillKit/** | **The Skill** — the Check already names the skill behind every ruling (`skill=`); SkillKit remembers what you're good at. Ranks are semantic and reach the arbiter as words. **v0.4: Volta's ladder and Skyrim Levels** — XP by task difficulty, success only, under code resolution; Level from the ranks you earn. | TAS's skill-learning (prior art); Volta; Skyrim | **v0.4.1** — v0.1.x LIVE-PROVEN ✔ · **PRPG** |
+| **TrackerKit/** | **The Gauge** — creator-declared gauges with per-resource physics: the Wound (prose), the Cost (the ruling's `resource=`), the Clock (drift). **v0.5: the Lock** — at 0 Health the story ends, and Erase is the way back. | RESR's meters (EB), FD's detectHurt, TAS | **v0.5.0** — v0.2.x LIVE-PROVEN ✔ · **PRPG** |
+| **SheetKit/** | **The Sheet** — the Trackers card evolved: identity player-authored above the rule line, engine projection below, every number translated by the Semantic Layer. | FD's character card (layout comb) | **v0.1.4** — harness-passed · **PRPG** |
 | **EventKit/** | **The Intrusion** — the world acts without player prompting: weighted category tables, flavor pools as data, effects attached by category. | RESR, Fusion Dungeon | **v0.1.1** — live-confirmed ✔ · **PRPG** |
+| **ObserverKit/** | **The Record** — one flat record per ruling, kept in state for an external harvester: does the dice roll actually move outcomes? | The Observatory | **v0.1.3** — harness-passed · **PRPG** |
 
 ## The action lifecycle
 
