@@ -1,4 +1,8 @@
-// ===== ObserverKit v0.1.3 =====
+// ===== ObserverKit v0.1.4 =====
+// v0.1.4 — LUCK (GateKit v0.10.0, 10/7/2026): code-resolved records now carry
+//  `luck` (the d20 face — it was null in code mode) and `lp` (its effect in
+//  percentage points, -18..+18), so the harvester can measure luck's real
+//  effect on outcomes and check that difficulty ratings ignore it.
 // v0.1.3 — the CODE-RESOLUTION FIELDS (GateKit v0.9.0, 9/25/2026): when a
 //  ruling was resolved by the success table, the record also carries
 //  dx (difficulty rank 0-7, null for trivial/impossible), roll (the
@@ -198,6 +202,7 @@ function OB_onOutput(text) {
         if (c && c.resolution === "code") {         // v0.1.3: the success table's receipt
             rec.dx = (typeof c.difficultyIndex === "number") ? c.difficultyIndex : null;
             rec.roll = c.roll; rec.p = c.chance; rec.ex = c.expected; rec.ok = c.compliant;
+            if (typeof c.luckPoints === "number") rec.lp = c.luckPoints;   // v0.1.4: luck in points (GateKit v0.10.0)
         }
         if (OB.tag) rec.cell = OB.tag;
         if (OB.maxTurn > turn) rec.replay = true;   // the story rewound past this turn once (v0.1.1)
@@ -231,4 +236,4 @@ function OB_flush(out) {
 }
 
 // Load canary
-try { if (typeof log === "function") log("[ObserverKit] library loaded (v0.1.3)"); } catch (e) {}
+try { if (typeof log === "function") log("[ObserverKit] library loaded (v0.1.4)"); } catch (e) {}

@@ -283,7 +283,7 @@ H.assert(state.vars.SK.skills.swimming.uses === 167, "…and an expert success p
 // GateKit x SkillKit: the table is built from SK_ranks, the scale from SK_benchmarks.
 H.turn(72, "do", H.doFrame("You climb")); H.resetCaches();
 GK_onInput(H.doFrame("You climb"));
-state.vars.GK.roll = 20;
+state.vars.GK.roll = 20; state.vars.GK.luck = 10;   // neutral luck (GateKit v0.10.0)
 const joint = GK_onContext(H.ctx());
 H.assert(/untrained \(0\): No training\n/.test(joint) && /legendary \(7\): At the limits of the setting\n/.test(joint),
     "the scale carries Volta's generic benchmarks, numbered");

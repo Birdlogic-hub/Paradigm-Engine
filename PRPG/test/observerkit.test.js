@@ -84,12 +84,12 @@ H.assert(state.vars.GK.commandTurn === 9 && OB_ring().filter(x => x.t === 9).len
 SC_get("GateKit Config").entry = SC_get("GateKit Config").entry.replace("Resolution: model", "Resolution: code");
 H.turn(10, "do", H.doFrame("You climb the chimney")); H.resetCaches();
 OB_onInput(GK_onInput(H.doFrame("You climb the chimney")));
-state.vars.GK.roll = 30;
+state.vars.GK.roll = 30; state.vars.GK.luck = 10;   // neutral luck
 OB_onContext(GK_onContext(H.ctx()));
 SK_onOutput(OB_onOutput(GK_onOutput("skill=climbing; difficulty=expert; check=success;\nYou wedge upward.")));
 rec = OB_ring()[OB_ring().length - 1];
-H.assert(rec.t === 10 && rec.dx === 5 && rec.roll === 30 && rec.p === 0.0875 && rec.ex === "fail" && rec.ok === false && rec.luck === null,
-    "code record: dx, roll, odds, what the table said, compliance (Apprentice at expert: 8.75%, rolled 30)");
+H.assert(rec.t === 10 && rec.dx === 5 && rec.roll === 30 && rec.p === 0.0625 && rec.ex === "fail" && rec.ok === false && rec.luck === 10 && rec.lp === 0,
+    "code record: dx, roll, odds, luck, what the table said, compliance (Apprentice at expert: 6.25%, rolled 30)");
 H.assert(OB_ring().filter(x => x.t < 10).every(x => !("dx" in x)), "model-resolved records carry none of it");
 SC_get("GateKit Config").entry = SC_get("GateKit Config").entry.replace("Resolution: code", "Resolution: model");
 

@@ -31,7 +31,7 @@ Every Do, Say and Story turn goes to **the Check**. The DM names the skill invol
 There are two ways the middle gets decided, set on the GateKit Config's `Resolution` line:
 
 - **`Resolution: model`** (the default). The DM rates the task `minor` or `major` with an explicit **d20 luck roll** in view, and rules success, partial, or fail the way a DM reads a d20.
-- **`Resolution: code`**. The DM rates the task on the **skill ladder** (Untrained to Legendary), and the outcome is looked up, not judged. The engine rolls before the DM writes a word and hands it a table of what each of your skills can clear this turn. When your rank matches the task you succeed 70% of the time; each rank you fall short halves that, each rank to spare halves your chance of failing. Success or failure only. The Event Log shows the odds and the roll.
+- **`Resolution: code`**. The DM rates the task on the **skill ladder** (Untrained to Legendary), and the outcome is looked up, not judged. The engine rolls before the DM writes a word and hands it a table of what each of your skills can clear this turn. When your rank matches the task you succeed 50% of the time; each rank you fall short halves that, each rank to spare halves your chance of failing. Then **luck**: the d20 adds its face to the odds, from −18 points on a 1 to +18 on a 20 (10 and 11 are neutral). The DM sees the roll and can narrate your fortune, but the result is already in the table. Success or failure only. The Event Log shows the odds, the luck and the roll.
 
 A ruling can also carry a cost or a restore (`resource=stamina -8`), which moves your gauges. It's capped at 25% of the gauge per turn, so no single sentence can kill you by arithmetic. Deliberate scripted effects are not capped. Falls can be fatal.
 
@@ -189,7 +189,7 @@ Each inventory verb has a policy line: `none` (pure bookkeeping), `outcome` (com
 
 PRPG consumes only public engine seams:
 
-- **GateKit:** `GK_lastCheck()`, `GK_setLuck`, `GK_markCommandTurn` / `GK_isCommandTurn`, `GK_setArbiterNote`, `GK_resolution()`, `GK_chance(skillRank, difficultyRank)`
+- **GateKit:** `GK_lastCheck()`, `GK_setLuck` (bends luck in both modes), `GK_markCommandTurn` / `GK_isCommandTurn`, `GK_setArbiterNote`, `GK_resolution()`, `GK_chance(skillRank, difficultyRank[, luckPoints])`, `GK_luckPoints(face)`
 - **CardLib:** `SC_config`, `SC_render`, `SC_report`, `SC_codex`
 - **InventoryKit:** `INV_readEquipment`
 - **SkillKit:** `SK_level`, `SK_levelState`, `SK_epithet`, `SK_rank`, `SK_ranks`, `SK_benchmarks`
@@ -198,6 +198,6 @@ PRPG consumes only public engine seams:
 
 Thematic event pools register in code with `EV_addPool(category, entries)`; see EventKit's marked extend-here region. If you need something that isn't public, that's an engine design bug worth reporting.
 
-Versioned against **PE Essentials** (RewindKit v0.1.0 · RegexLib v0.1.1 · CardLib v0.4.4 · GateKit v0.9.2 · InventoryKit v0.2.7), with SkillKit v0.4.1 · TrackerKit v0.5.0 · EventKit v0.1.1 · SheetKit v0.1.4 · ObserverKit v0.1.3. The committed bundle is the authoritative artifact: it embeds these exact module versions.
+Versioned against **PE Essentials** (RewindKit v0.1.0 · RegexLib v0.1.1 · CardLib v0.4.4 · GateKit v0.10.0 · InventoryKit v0.2.7), with SkillKit v0.4.1 · TrackerKit v0.5.0 · EventKit v0.1.1 · SheetKit v0.1.4 · ObserverKit v0.1.4. The committed bundle is the authoritative artifact: it embeds these exact module versions.
 
 **Running the tests**: clone the [Paradigm-Engine](https://github.com/Birdlogic-hub/Paradigm-Engine) repo. This folder ships alongside `PE Essentials/`, whose harness and core modules the suites load directly. Then `node test\run.js` to run them all, or `node test\<suite>.test.js` for one. Bundle with `node make-bundle.js`.

@@ -1,4 +1,17 @@
-// ===== GateKit v0.9.2 =====
+// ===== GateKit v0.10.0 =====
+// v0.10.0 — LUCK IN CODE RESOLUTION (owner rulings 10/7/2026; Documentation/
+//  Design Proposals/Code Resolution - Design Proposal.md §8). Base odds return
+//  to Volta's half rule at 50% for an equal rank (was 70%), and the d20 GateKit
+//  already rolls each action becomes additive LUCK: a symmetric line in 2-point
+//  steps, 10-11 neutral — 1 = -18 ... 9 = -2, 12 = +2 ... 20 = +18
+//  (GK_luckPoints). Chance = base + luck, clamped 0..1; trivial and impossible
+//  untouched. The success table is built with luck applied, the arbiter sees
+//  "luck=N (a d20 roll) — already counted in the table: let it color the
+//  narration, never the result", and GK_setLuck now WORKS in code mode — a
+//  fortune-bender sets the face before the table is built. lastCheck gains
+//  baseChance + luckPoints and keeps luck (was null in code mode). Luck averages
+//  to zero, so outcomes average the base; its value is narration, a scripter
+//  lever, and a measured effect. GK_chance takes an optional third argument.
 // v0.9.2 — trivial means trivial for ANYONE (owner call, 9/25): the code-mode
 //  block defined trivial only as "cannot fail", which a skilled enough player
 //  makes true of almost anything — and trivial never teaches (SkillKit), so a
@@ -109,7 +122,8 @@
 //   GK_markCommandTurn()  → stamp this turn non-adjudicable (bookkeeping)
 //   GK_isCommandTurn()    → is this turn stamped? (v0.8.2 — ask, don't peek)
 //   GK_setArbiterNote(owner, line) → one rendered line in the arbiter block (160 cap)
-//   GK_chance(skillRank, difficultyRank) → success odds 0..1 (v0.9.0, code resolution)
+//   GK_chance(skillRank, difficultyRank[, luckPoints]) → success odds 0..1 (v0.9.0; luck v0.10.0)
+//   GK_luckPoints(d20face) → luck in percentage points, -18..+18 (v0.10.0)
 //   GK_resolution()       → "model" | "code", the live Resolution setting (v0.9.1)
 // ---------------------------------------------------------------------------
 
@@ -138,15 +152,30 @@ function GK_rollDie() {
 // --- Code resolution (v0.9.0) ----------------------------------------------------
 // The rank ladder, shared vocabulary with SkillKit (index = rank 0..7).
 const GK_RANKS = ["untrained", "novice", "apprentice", "intermediate", "advanced", "expert", "master", "legendary"];
-const GK_BASE_CHANCE = 0.7;     // success at an equal rank (owner ruling 9/25)
+const GK_BASE_CHANCE = 0.5;     // success at an equal rank: Volta's half rule (v0.10.0; was 0.7)
 
-// The half rule around 70%: each rank short halves success, each rank spare
-// halves failure. Monotonic in difficulty, which is what makes the table work.
-function GK_chance(skillRank, difficultyRank) {
+// v0.10.0 — LUCK: the d20 face as percentage points on the odds. A symmetric
+// line in 2-point steps, 10-11 neutral (owner, 10/7): 1 = -18 ... 9 = -2,
+// 12 = +2 ... 20 = +18. Averages to zero, so the base holds on average.
+function GK_luckPoints(face) {
+    if (face == null || face === "") return 0;          // no d20 is no luck (Number(null) would read as face 1)
+    const f = Math.round(Number(face));
+    if (!Number.isFinite(f)) return 0;
+    if (f <= 9) return -2 * (10 - Math.max(GK_DIE_MIN, f));
+    if (f >= 12) return 2 * (Math.min(GK_DIE_MAX, f) - 11);
+    return 0;
+}
+
+// The half rule around the base: each rank short halves success, each rank
+// spare halves failure; then luck (v0.10.0, optional points), clamped 0..1.
+// Monotonic in difficulty for any luck, which is what makes the table work.
+function GK_chance(skillRank, difficultyRank, luckPoints) {
     const gap = Number(skillRank) - Number(difficultyRank);
-    return gap >= 0
+    const base = gap >= 0
         ? 1 - (1 - GK_BASE_CHANCE) * Math.pow(0.5, gap)
         : GK_BASE_CHANCE * Math.pow(0.5, -gap);
+    const lp = Number(luckPoints) || 0;
+    return Math.max(0, Math.min(1, base + lp / 100));
 }
 
 function GK_rollPercent() {
@@ -175,10 +204,10 @@ function GK_skillRank(skill) {
     try { return Math.max(0, GK_rankIndex(SK_rank(skill))); } catch (e) { return 0; }
 }
 
-// The highest difficulty a roll still clears at a held rank; -1 = none.
-function GK_ceiling(rank, roll) {
+// The highest difficulty a roll still clears at a held rank, with luck; -1 = none.
+function GK_ceiling(rank, roll, luckPoints) {
     let best = -1;
-    for (let d = 0; d < GK_RANKS.length; d++) if (roll < GK_chance(rank, d) * 100) best = d;
+    for (let d = 0; d < GK_RANKS.length; d++) if (roll < GK_chance(rank, d, luckPoints) * 100) best = d;
     return best;
 }
 
@@ -201,8 +230,8 @@ function GK_scaleLines() {
     return lines;
 }
 
-// The success table for this roll: every ranked skill, then everyone else.
-function GK_tableLines(roll) {
+// The success table for this roll and this luck: every ranked skill, then everyone else.
+function GK_tableLines(roll, luckPoints) {
     const say = c => c < 0 ? "fails unless trivial" : GK_RANKS[c];
     const rows = [];
     if (typeof SK_ranks === "function") {
@@ -212,9 +241,9 @@ function GK_tableLines(roll) {
             .map(n => ({ n: n, r: Math.max(0, GK_rankIndex(held[n])) }))
             .filter(x => x.r > 0)
             .sort((a, b) => b.r - a.r || a.n.localeCompare(b.n))
-            .forEach(x => rows.push("- " + x.n + ": " + say(GK_ceiling(x.r, roll))));
+            .forEach(x => rows.push("- " + x.n + ": " + say(GK_ceiling(x.r, roll, luckPoints))));
     }
-    rows.push("- any other skill: " + say(GK_ceiling(0, roll)));
+    rows.push("- any other skill: " + say(GK_ceiling(0, roll, luckPoints)));
     return rows;
 }
 
@@ -239,6 +268,7 @@ const GK_PROMPT_CODE = [
     "Rate difficulty as the skill rank the task demands under ordinary conditions, judged from the task alone:",
     "{{SCALE}}",
     "trivial = no one could fail, even without training. Never rate a task trivial because this player is skilled; rate it as if you did not know who is attempting it. impossible = cannot succeed.",
+    "luck={{LUCK}} (a d20 roll) — already counted in the table: let it color the narration, never the result.",
     "Outcome table. The check SUCCEEDS when the difficulty is at or below:",
     "{{TABLE}}",
     "Otherwise it FAILS.",
@@ -252,7 +282,7 @@ const GK_PROMPT_CODE = [
 // Load canary: appears in Console Log / Script Test logs on EVERY hook run.
 // If you don't see this line, the Library isn't attached, saved, or executing.
 try {
-    if (GK_cfg().DEBUG_CONSOLE) log("[GateKit] library loaded (v0.9.2)");
+    if (GK_cfg().DEBUG_CONSOLE) log("[GateKit] library loaded (v0.10.0)");
 } catch (e) {}
 
 // Verdict line emitted by the model (v0.7.0 skill-first schema: the model
@@ -431,7 +461,8 @@ function GK_onContext(text) {
         // v0.9.0: the scale to rate against, the table that rules; notes after the table.
         block = GK_PROMPT_CODE
             .replace("{{SCALE}}", () => GK_scaleLines().join("\n"))    // creator text: no $-patterns
-            .replace("{{TABLE}}", () => GK_tableLines(GK.roll).join("\n"));
+            .replace("{{LUCK}}", () => String(GK.luck))                 // v0.10.0: the d20, in view
+            .replace("{{TABLE}}", () => GK_tableLines(GK.roll, GK_luckPoints(GK.luck)).join("\n"));
         if (notes) block = block.replace(/^(Otherwise it FAILS\.)$/m, m0 => m0 + "\n" + notes);
     } else {
         block = GK_PROMPT
@@ -519,12 +550,15 @@ function GK_onOutput(text) {
         // measured against it, never overwritten (the prose already shows it).
         let res = null;
         if (ranked) {
-            res = { difficultyRank: null, difficultyIndex: null, skillRank: GK_skillRank(skill), chance: null, expected: null };
+            res = { difficultyRank: null, difficultyIndex: null, skillRank: GK_skillRank(skill), chance: null, expected: null,
+                baseChance: null, luckPoints: null };
             const di = GK_rankIndex(difficulty);
             if (di >= 0) {
                 res.difficultyIndex = di;
                 res.difficultyRank = GK_RANKS[di];
-                res.chance = Math.round(GK_chance(res.skillRank, di) * 10000) / 10000;
+                res.luckPoints = GK_luckPoints(GK.luck);                  // v0.10.0: luck never touches trivial/impossible
+                res.baseChance = Math.round(GK_chance(res.skillRank, di) * 10000) / 10000;
+                res.chance = Math.round(GK_chance(res.skillRank, di, res.luckPoints) * 10000) / 10000;
                 res.expected = (GK.roll != null && GK.roll < res.chance * 100) ? "success" : "fail";
                 difficulty = di <= res.skillRank ? "minor" : "major";   // consumers keep the old vocabulary
             } else {
@@ -554,7 +588,7 @@ function GK_onOutput(text) {
             skill: skill,
             resource: resource,
             resourceDelta: resourceDelta,
-            luck: code ? null : GK.luck,             // code mode: the model never saw a d20
+            luck: GK.luck,                           // v0.10.0: code mode shows the d20 too (it was null)
             dialect: dialect,                        // parse metadata (v0.8.3, the Observatory's seam)
             raw: m[0].trim().slice(0, 160),          // the verdict line as the model wrote it
             turn: GK_turn(),
@@ -595,7 +629,9 @@ function GK_onOutput(text) {
                     + (c.resource ? " · " + c.resource + " "
                         + (c.resourceDelta > 0 ? "+" : "") + c.resourceDelta : "")
                     + (coded
-                        ? (c.chance != null ? " · " + Math.round(c.chance * 1000) / 10 + "% · rolled " + (Math.round(c.roll * 10) / 10) : "")
+                        ? (c.chance != null ? " · " + Math.round(c.baseChance * 1000) / 10 + "% · luck " + c.luck
+                            + " (" + (c.luckPoints >= 0 ? "+" : "") + c.luckPoints + ") → " + Math.round(c.chance * 1000) / 10
+                            + "% · rolled " + (Math.round(c.roll * 10) / 10) : "")
                             + (c.compliant ? "" : " · the table said " + c.expected)
                         : " · luck " + (GK.luck == null ? "-" : GK.luck)));
             } else if (playerTurn) {
@@ -624,7 +660,8 @@ function GK_onOutputDebug(text) {
         const summary = "checker: " + (cfg.ENABLED ? "ON" : "OFF")
             + " | turn: " + turn
             + (GK_codeMode(cfg)
-                ? " | roll: " + (GK.roll == null ? "-" : Math.round(GK.roll * 10) / 10)
+                ? " | luck: " + (GK.luck == null ? "-" : GK.luck + " (" + GK_luckPoints(GK.luck) + ")")
+                    + " | roll: " + (GK.roll == null ? "-" : Math.round(GK.roll * 10) / 10)
                 : " | luck: " + (GK.luck == null ? "-" : GK.luck))
             + " | verdict this turn: " + (hit
                 ? (c.difficultyRank || c.difficulty) + "/" + c.result + (c.skill ? "/" + c.skill : "")

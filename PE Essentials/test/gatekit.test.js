@@ -110,11 +110,19 @@ GK_onOutput("Climbing; major; success; resource=stamina -8;\nYou reach the maint
 H.assert(GK_lastCheck().resource === "stamina" && GK_lastCheck().resourceDelta === -8, "bare dialect carries the resource field");
 H.assert(GK_lastCheck().dialect === "bare", "the bare dialect NAMES itself (v0.8.3 — it reported skillFirst since v0.8.1)");
 
-// --- v0.9.0: code resolution (owner rulings 9/25) ------------------------------------
+// --- v0.9.0: code resolution (owner rulings 9/25); v0.10.0: 50% base + luck (10/7) ----
 const near = (a, b) => Math.abs(a - b) < 1e-9;
-H.assert(near(GK_chance(3, 3), 0.7) && near(GK_chance(2, 3), 0.35) && near(GK_chance(1, 3), 0.175) && near(GK_chance(0, 3), 0.0875)
-    && near(GK_chance(4, 3), 0.85) && near(GK_chance(5, 3), 0.925) && near(GK_chance(6, 3), 0.9625),
-    "the curve: 70% at an equal rank, halving per rank (35/17.5/8.75 below, 85/92.5/96.25 above)");
+H.assert(near(GK_chance(3, 3), 0.5) && near(GK_chance(2, 3), 0.25) && near(GK_chance(1, 3), 0.125) && near(GK_chance(0, 3), 0.0625)
+    && near(GK_chance(4, 3), 0.75) && near(GK_chance(5, 3), 0.875) && near(GK_chance(6, 3), 0.9375),
+    "the curve: Volta's half rule, 50% at an equal rank (25/12.5/6.25 below, 75/87.5/93.75 above) — v0.10.0");
+H.assert(GK_luckPoints(1) === -18 && GK_luckPoints(9) === -2 && GK_luckPoints(10) === 0 && GK_luckPoints(11) === 0
+    && GK_luckPoints(12) === 2 && GK_luckPoints(20) === 18,
+    "luck: a symmetric line in 2-point steps, 10-11 neutral (1 = -18 ... 20 = +18)");
+H.assert([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20].reduce((s, f) => s + GK_luckPoints(f), 0) === 0,
+    "luck averages to zero over the d20 — the base holds on average");
+H.assert(GK_luckPoints(null) === 0 && GK_luckPoints(undefined) === 0, "no d20 is no luck (a null face must not read as 1)");
+H.assert(GK_chance(3, 1, 18) === 1 && GK_chance(0, 3, -18) === 0 && near(GK_chance(3, 3, 12), 0.62),
+    "chance = base + luck, clamped to 0..1");
 H.assert(/Resolution: model/.test(SC_get("GateKit Config").entry), "config card carries Resolution, model by default");
 
 // Model mode never reads the rank ladder: a code-dialect line is a near-miss.
@@ -129,64 +137,83 @@ H.assert(GK_resolution() === "model", "GK_resolution() reads model by default (v
 SC_get("GateKit Config").entry = SC_get("GateKit Config").entry.replace("Resolution: model", "Resolution: code");
 H.resetCaches();
 H.assert(GK_resolution() === "code", "GK_resolution() follows the live card");
-function codeTurn(n, action, roll) {
+// Pin both draws: the percentile roll and the d20 (10 = neutral luck unless a test says otherwise).
+function codeTurn(n, action, roll, luck) {
     H.turn(n, "do", H.doFrame(action)); H.resetCaches();
     GK_onInput(H.doFrame(action));
-    state.vars.GK.roll = roll;              // pin the draw (the table is a pure function of it)
+    state.vars.GK.roll = roll;
+    state.vars.GK.luck = (luck === undefined) ? 10 : luck;
     return GK_onContext(H.ctx());
 }
-let cctx = codeTurn(150, "You climb", 50);
-H.assert(cctx.endsWith("</SYSTEM>") && !/luck=/.test(cctx) && !/d20/.test(cctx), "code block: no luck line, no d20");
+let cctx = codeTurn(150, "You climb", 40);
+H.assert(cctx.endsWith("</SYSTEM>") && /^luck=10 \(a d20 roll\) — already counted in the table: let it color the narration, never the result\.$/m.test(cctx),
+    "code block: the d20 is in view, marked as already counted (v0.10.0)");
 H.assert(/trivial = no one could fail, even without training\. Never rate a task trivial because this player is skilled/.test(cctx),
     "trivial is pinned to anyone, never relative to this player's skill (v0.9.2)");
 H.assert(/untrained < novice < apprentice < intermediate < advanced < expert < master < legendary/.test(cctx),
     "without SkillKit the scale is the bare ladder");
-H.assert(/- any other skill: untrained\nOtherwise it FAILS\./.test(cctx), "roll 50: untrained clears (70%), novice doesn't (35%)");
-H.assert(/- any other skill: novice\n/.test(codeTurn(151, "You climb", 20)), "roll 20: novice clears (35%), apprentice doesn't (17.5%)");
+H.assert(/- any other skill: untrained\nOtherwise it FAILS\./.test(cctx), "roll 40, neutral luck: untrained clears (50%), novice doesn't (25%)");
+H.assert(/- any other skill: novice\n/.test(codeTurn(151, "You climb", 20)), "roll 20: novice clears (25%), apprentice doesn't (12.5%)");
 H.assert(/- any other skill: fails unless trivial\n/.test(codeTurn(152, "You climb", 95)), "roll 95: nothing clears");
-const r152 = state.vars.GK.roll;
+const r152 = state.vars.GK.roll, l152 = state.vars.GK.luck;
 GK_onInput(H.doFrame("You climb"));
-H.assert(state.vars.GK.roll === r152, "a retry of the same action reuses the draw");
+H.assert(state.vars.GK.roll === r152 && state.vars.GK.luck === l152, "a retry of the same action reuses both draws");
+H.assert(/- any other skill: fails unless trivial\n/.test(codeTurn(153, "You climb", 60, 10))
+    && /- any other skill: untrained\n/.test(codeTurn(154, "You climb", 60, 20)),
+    "luck moves the table: roll 60 fails at 50%, clears untrained at 68% (+18)");
 GK_setArbiterNote("TK", "gauges: health fine");
-H.assert(/Otherwise it FAILS\.\ngauges: health fine\n/.test(codeTurn(153, "You climb", 50)), "notes ride directly after the table");
+H.assert(/Otherwise it FAILS\.\ngauges: health fine\n/.test(codeTurn(155, "You climb", 50)), "notes ride directly after the table");
 GK_setArbiterNote("TK", "");
 
-// Compliant ruling: roll 50, untrained (70%) -> success.
-codeTurn(160, "You climb the fence", 50);
+// Compliant ruling: roll 40, untrained (50%), neutral luck -> success.
+codeTurn(160, "You climb the fence", 40);
 out = GK_onOutput("skill=climbing; difficulty=untrained; check=success; resource=none;\nYou swing over.");
 let cc = GK_lastCheck();
 H.assert(cc.resolution === "code" && cc.difficultyRank === "untrained" && cc.difficultyIndex === 0 && cc.skillRank === 0
-    && near(cc.chance, 0.7) && cc.roll === 50 && cc.expected === "success" && cc.compliant === true,
-    "code ruling carries rank, chance, roll, expected and compliance");
-H.assert(cc.difficulty === "minor" && cc.luck === null, "consumers keep the old vocabulary (at/below held rank = minor); no luck in code mode");
+    && near(cc.chance, 0.5) && near(cc.baseChance, 0.5) && cc.luckPoints === 0 && cc.luck === 10
+    && cc.roll === 40 && cc.expected === "success" && cc.compliant === true,
+    "code ruling carries rank, base, luck, chance, roll, expected and compliance");
+H.assert(cc.difficulty === "minor", "consumers keep the old vocabulary (at/below held rank = minor)");
 H.assert(/^You swing over\./.test(out), "verdict stripped from prose");
-H.assert(/ruling: untrained difficulty → success \(climbing, untrained\) · 70% · rolled 50$/m.test(SC_get("Event Log").entry),
-    "Event Log shows the odds and the roll");
+H.assert(/ruling: untrained difficulty → success \(climbing, untrained\) · 50% · luck 10 \(\+0\) → 50% · rolled 40$/m.test(SC_get("Event Log").entry),
+    "Event Log shows base odds, luck, final odds and the roll");
 
-// Non-compliant ruling: roll 20 at novice (35%) should succeed; the arbiter wrote fail.
+// Non-compliant ruling: roll 20 at novice (25%) should succeed; the arbiter wrote fail.
 codeTurn(161, "You climb the wall", 20);
 GK_onOutput("skill=climbing; difficulty=novice; check=fail;\nYou slip.");
 cc = GK_lastCheck();
 H.assert(cc.result === "fail" && cc.expected === "success" && cc.compliant === false && cc.difficulty === "major",
     "the written check stands (the prose shows it); compliance is measured, not enforced");
-H.assert(/· 35% · rolled 20 · the table said success$/m.test(SC_get("Event Log").entry), "the mismatch is reported");
+H.assert(/· 25% · luck 10 \(\+0\) → 25% · rolled 20 · the table said success$/m.test(SC_get("Event Log").entry), "the mismatch is reported");
+
+// GK_setLuck works in code mode: a fortune-bender sets the face before the table is built.
+H.turn(166, "do", H.doFrame("You leap the chasm")); H.resetCaches();
+GK_onInput(H.doFrame("You leap the chasm"));
+state.vars.GK.roll = 60;
+GK_setLuck(20);                                        // the blessing
+const blessed = GK_onContext(H.ctx());
+GK_onOutput("skill=jumping; difficulty=untrained; check=success;\nYou land it.");
+cc = GK_lastCheck();
+H.assert(/^luck=20 /m.test(blessed) && cc.luck === 20 && cc.luckPoints === 18 && near(cc.chance, 0.68) && cc.expected === "success",
+    "GK_setLuck bends a code-mode outcome: roll 60 succeeds at 50% + 18 (v0.10.0)");
+H.assert(/· 50% · luck 20 \(\+18\) → 68% · rolled 60$/m.test(SC_get("Event Log").entry), "the blessing shows in the Event Log");
 
 // Dialects: bare, digit difficulty, trivial, impossible.
 codeTurn(162, "You haul yourself up", 10);
 GK_onOutput("Climbing; apprentice; success; resource=stamina -4;\nYou make it.");
 cc = GK_lastCheck();
 H.assert(cc.dialect === "bare" && cc.difficultyRank === "apprentice" && cc.compliant === true && cc.resourceDelta === -4,
-    "bare dialect on the ladder (10 < 17.5: success) keeps its resource field");
+    "bare dialect on the ladder (10 < 12.5: success) keeps its resource field");
 codeTurn(163, "You climb", 5);
 GK_onOutput("skill=climbing; difficulty=3 (3); check=success;\nUp.");
 H.assert(GK_lastCheck().difficultyRank === "intermediate" && GK_lastCheck().compliant === true, "digit difficulty, echoed (n) tolerated");
-codeTurn(164, "You wave", 99);
+codeTurn(164, "You wave", 99, 1);
 GK_onOutput("skill=none; difficulty=trivial; check=success;\nYou wave.");
-H.assert(GK_lastCheck().expected === "success" && GK_lastCheck().compliant === true && GK_lastCheck().chance === null,
-    "trivial always succeeds, whatever the roll");
-codeTurn(165, "You fly", 1);
+H.assert(GK_lastCheck().expected === "success" && GK_lastCheck().compliant === true && GK_lastCheck().chance === null && GK_lastCheck().luckPoints === null,
+    "trivial always succeeds, whatever the roll — and luck never touches it");
+codeTurn(165, "You fly", 1, 20);
 GK_onOutput("skill=flight; difficulty=impossible; check=success;\nYou soar.");
-H.assert(GK_lastCheck().result === "fail" && GK_lastCheck().compliant === true, "impossible still coerces to fail");
+H.assert(GK_lastCheck().result === "fail" && GK_lastCheck().compliant === true, "impossible still coerces to fail, even on a 20");
 SC_get("GateKit Config").entry = SC_get("GateKit Config").entry.replace("Resolution: code", "Resolution: model");
 
 H.summary("GateKit");
