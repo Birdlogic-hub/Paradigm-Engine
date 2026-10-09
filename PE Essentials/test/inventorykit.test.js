@@ -206,4 +206,68 @@ H.assert(state.vars.INV.equip.tool.length === 0, "loose unequip: 'pick' finds th
 H.assert(SC_get("Inventory").keys !== "Inventory",
     "the Standing Ledger: Inventory card keys always-on by default (v0.2.4)");
 
+// --- v0.2.8: the grabby narrator — a standing note through GateKit's seam -----------
+H.assert(INV_NOTE.length <= 160 && INV_NOTE_PICKUP.length <= 160, "both notes fit GateKit's 160-char cap");
+H.turn(900, "do"); H.resetCaches();
+GK_onInput(INV_onInput(H.doFrame("You search the crates.")));
+let invCtx = GK_onContext(H.ctx());
+H.assert(state.vars.GK.notes.INV === INV_NOTE_PICKUP, "InventoryKit owns the note (owner INV); Auto Pickup on by default asks for gain=");
+H.assert(invCtx.indexOf(INV_NOTE_PICKUP) !== -1 && invCtx.indexOf(INV_NOTE_PICKUP) < invCtx.lastIndexOf("</SYSTEM>"),
+    "the note fires inside GateKit's arbiter block");
+
+// --- v0.3.0: Auto Pickup — the ruling's gain= field ------------------------------------
+// The live case, verbatim: the narrator pockets the coin; the ruling reports it.
+r = play(901, H.doFrame("You search the crates."),
+    "skill=none; difficulty=minor; check=success; resource=none; gain=a tarnished silver coin\nYou pull it free: a single tarnished silver coin. You pocket it.");
+H.assert(INV_count("tarnished silver coin") === 1, "gain= adds what the narrator handed over");
+H.assert(/^\{Picked up: tarnished silver coin x1\}/.test(r.out) && r.out.indexOf("gain=") === -1, "an echo receipt; the field never reaches the story");
+H.assert(/picked up: tarnished silver coin x1 \(auto\)/.test(SC_get("Event Log").entry), "the Event Log receipt");
+// Generous parsing: lists, counts before or after, number words, plurals stacking.
+const held = n => INV_count(n);
+const pre = { torches: held("torches"), rope: held("rope"), spikes: held("iron spikes"), tonic: held("healing tonic") };
+r = play(902, H.doFrame("You loot the bodies."),
+    "Looting; minor; success; none; gain=2 torches, rope x1, three iron spikes & healing tonic (2)\nYou gather what you can.");
+H.assert(held("torches") === pre.torches + 2 && held("rope") === pre.rope + 1 && held("iron spikes") === pre.spikes + 3 && held("healing tonic") === pre.tonic + 2,
+    "a list: 2 torches, rope x1, three iron spikes & healing tonic (2)");
+play(903, H.doFrame("You search the shelf."), "skill=none; difficulty=trivial; check=success; gain: torch +1\nAnother torch.");
+H.assert(held("torches") === pre.torches + 3 && held("torch") === 0, "'torch +1' stacks on the held 'torches' (plural twin)");
+// Gain anywhere on the line, or alone on the next one.
+play(904, H.doFrame("You take the key."), "skill=none; gain=brass key; difficulty=trivial; check=success; resource=none\nYou take it.");
+H.assert(INV_count("brass key") === 1 && GK_lastCheck().turn === 904 && GK_lastCheck().resource === null, "gain mid-line: the ruling still parses");
+r = play(905, H.doFrame("You take the map."), "skill=none; difficulty=trivial; check=success\ngain=old map\nYou fold the map away.");
+H.assert(INV_count("old map") === 1 && /^\{Picked up: old map x1\}\n\nYou fold/.test(r.out), "gain alone on the next line");
+// Currency lands in the Wallet when the Wallet already holds it.
+const goldBefore = INV_walletGet("gold");
+play(906, H.doFrame("You search the purse."), "skill=none; difficulty=trivial; check=success; gain=12 gold\nCoins spill out.");
+H.assert(goldBefore > 0 && INV_walletGet("gold") === goldBefore + 12 && INV_count("gold") === 0, "a gain naming a held currency goes to the Wallet");
+// none / no gain field: nothing changes.
+const itemsBefore = state.vars.INV.items.length;
+play(907, H.doFrame("You look around."), "skill=none; difficulty=trivial; check=success; gain=none\nNothing here.");
+play(908, H.doFrame("You look around."), "skill=none; difficulty=trivial; check=success;\nNothing here.");
+H.assert(state.vars.INV.items.length === itemsBefore, "gain=none and no gain field add nothing");
+// Retry reverses the previous attempt's gains before applying the new one.
+play(909, H.doFrame("You search the chest."), "skill=none; difficulty=minor; check=success; gain=ruby\nA ruby!");
+H.assert(INV_count("ruby") === 1, "the first attempt gains a ruby");
+H.resetCaches(); GK_onContext(H.ctx());
+INV_onOutput(GK_onOutput("skill=none; difficulty=minor; check=success; gain=emerald\nAn emerald!"));
+H.assert(INV_count("ruby") === 0 && INV_count("emerald") === 1, "a retry reverses the ruby and applies the emerald");
+H.assert(state.vars.INV.log.filter(op => op.turn === 909).length === 1, "…and the undo ring holds only the surviving gain");
+// /undo reverses one gain.
+play(910, H.doFrame("/undo"), "Okay.");
+H.assert(INV_count("emerald") === 0, "/undo reverses an auto gain");
+// Command turns ignore gain= (the command already took it — no doubles).
+play(911, H.doFrame("/take lantern"), "skill=none; difficulty=trivial; check=success; gain=lantern\nYou take the lantern.");
+H.assert(INV_count("lantern") === 1, "a /take turn's gain= is ignored: one lantern, not two");
+// The cap: five a turn.
+play(912, H.doFrame("You sweep the table clean."), "skill=none; difficulty=trivial; check=success; gain=cup, plate, fork, knife, spoon, bowl, jug\nYou take everything.");
+H.assert(INV_count("spoon") === 1 && INV_count("bowl") === 0 && /2 more ignored/.test(SC_get("Event Log").entry), "at most five a turn; the rest reported");
+// Prose that says "gain:" is not a field.
+r = play(913, H.doFrame("You read the ledger."), "skill=none; difficulty=trivial; check=success;\nThe ledger reads: gain: 40 crowns, loss: 12.");
+H.assert(INV_walletGet("crowns") === 0 && INV_count("40 crowns") === 0 && /gain: 40 crowns/.test(r.out), "prose 'gain:' on a story line is left alone");
+// Auto Pickup: false — the field is ignored and the v0.2.8 guard note returns.
+SC_get("Inventory Config").entry = SC_get("Inventory Config").entry.replace("Auto Pickup: true", "Auto Pickup: false");
+play(914, H.doFrame("You search the crates."), "skill=none; difficulty=minor; check=success; gain=gem\nA gem.");
+H.assert(INV_count("gem") === 0 && state.vars.GK.notes.INV === INV_NOTE, "Auto Pickup: false — gain ignored, the guard note back");
+SC_get("Inventory Config").entry = SC_get("Inventory Config").entry.replace("Auto Pickup: false", "Auto Pickup: true");
+
 H.summary("InventoryKit");

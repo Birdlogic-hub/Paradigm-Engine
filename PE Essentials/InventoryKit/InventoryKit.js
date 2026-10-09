@@ -1,4 +1,26 @@
-// ===== InventoryKit v0.2.7 =====
+// ===== InventoryKit v0.3.0 =====
+// v0.3.0 — AUTO PICKUP (owner rulings 10/9/2026, all seven leans; the
+//  Grabby Narrator's real fix): instead of fighting the narrator, record
+//  what it hands over. The ruling's gain= field (GateKit v0.11.0) adds what
+//  the player took or was given. Inventory Config `Auto Pickup: true`
+//  (default) swaps the arbiter note to "add gain= when the player takes or
+//  is given items"; false restores v0.2.8's guard and /take-only pickup.
+//  Gains only — dropping, using and giving stay commands. A gain naming a
+//  currency already in the Wallet lands there. Ignored on inventory-command
+//  turns (no doubles). A retry reverses the previous attempt's gains first;
+//  /undo reverses one gain at a time; Erase is RewindKit's. At most 5 items
+//  a turn, 99 of one, 40-char names. Parsed generously (INV_parseGain).
+//  Receipts: an echo line and the Event Log ("picked up: … (auto)").
+// v0.2.8 — the GRABBY NARRATOR (player report, TemporaryCrunch 10/9/2026,
+//  FDE public test): "You search the crates" → "You pull it free... You
+//  pocket it." The prose took the coin; the ledger never did. STATE IS TRUTH
+//  (the Tonic Incident, mirrored): the model treats a search as including
+//  the take, and nothing in context said how items enter the inventory.
+//  Fix, owner-ruled: a standing arbiter note, owned here and delivered
+//  through GateKit's note seam (GK_setArbiterNote, owner "INV") — found
+//  items stay where they lie unless the player's action takes them. It
+//  narrows the drift, it can't forbid it; automatic pickup (a verdict field)
+//  stays a post-freeze proposal.
 // v0.2.7 — the KIT (player request, TemporaryCrunch 8/29/2026: "is there a way
 //  to pre-plant items into the inventory?"): two config-card lines stock a NEW
 //  adventure on turn 1 — `Starting Items` and `Starting Wallet` — following
@@ -163,6 +185,7 @@ const INV_SETTINGS = {
     STARTING_ITEMS: "(none)",      // the Kit (v0.2.7): granted once, on turn 1 only
     STARTING_WALLET: "(none)",     // same, for currencies
     INVENTORY_IN_CONTEXT: true,    // the Standing Ledger (v0.2.4): always-on keys, the arbiter sees holdings
+    AUTO_PICKUP: true,             // v0.3.0: the ruling's gain= field adds what the player took; false = /take only
     REPORT: true                   // post mutations to the "Event Log" card
 };
 
@@ -170,10 +193,16 @@ const INV_VERBS = ["take", "collect", "drop", "give", "throw", "use", "swap", "u
 const INV_NAME_CAP = 40;       // max chars for a /take'd item name
 const INV_ITEM_CAP = 99;       // max copies of one item (SIS's cap, kept)
 const INV_UNDO_MAX = 20;       // undo ring buffer depth (SIS's depth, kept)
+// v0.2.8: the arbiter note (GateKit caps notes at 160 chars). v0.3.0: two
+// notes — Auto Pickup on asks for the gain field; off keeps the v0.2.8 guard.
+const INV_NOTE = "Found items stay where they lie unless the player's action takes them. Never narrate the player pocketing or picking up what they did not ask to take.";
+const INV_NOTE_PICKUP = "If the player takes or is given items this turn, add gain= to the verdict line, e.g. gain=2 torch, silver coin. Otherwise leave gain out.";
+const INV_GAIN_MAX = 5;        // v0.3.0: items per auto pickup (a ceiling on what one turn can invent)
+const INV_NUMBER_WORDS = { a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, twelve: 12, a_pair_of: 2, a_couple_of: 2, some: 1, several: 3 };
 
 // Load canary
 try {
-    if (typeof log === "function") log("[InventoryKit] library loaded (v0.2.7)");
+    if (typeof log === "function") log("[InventoryKit] library loaded (v0.3.0)");
 } catch (e) {}
 
 // --- Live settings -----------------------------------------------------------------
@@ -438,6 +467,95 @@ function INV_mark() {
 // --- Stub helpers ----------------------------------------------------------------------
 function INV_qty(name, amount) { return amount > 1 ? amount + " " + name : "the " + name; }
 
+// --- Auto Pickup (v0.3.0): the ruling's gain= field --------------------------------------
+// Parse generously: "2 torch", "2x torch", "torch x2", "torch ×2", "torch +2",
+// "torch (2)", "a silver coin", "two torches", comma / "and" / "&" lists.
+// Returns [{ name, amount }] — at most INV_GAIN_MAX, names capped, counts 1..99.
+function INV_parseGain(raw) {
+    const out = [];
+    const segs = String(raw || "").split(/\s*(?:,|&|\band\b|\+(?=\s*[a-z]))\s*/i);
+    for (let i = 0; i < segs.length; i++) {
+        let s = segs[i].replace(/["'“”‘’`]/g, "").replace(/[.\s]+$/, "").trim();
+        if (!s) continue;
+        let n = null;
+        let m = s.match(/^(?:x|×)?\s*(\d+)\s*(?:x|×)?\s+(.+)$/i)                // 2 torch · 2x torch · x2 torch
+            || s.match(/^\+\s*(\d+)\s+(.+)$/);                                      // +2 torch
+        if (m) { n = parseInt(m[1], 10); s = m[2]; }
+        else if ((m = s.match(/^(.+?)\s*(?:(?:x|×|\+)\s*(\d+)|\(\s*(\d+)\s*\)|\s(\d+))$/i))) {   // torch x2 · torch +2 · torch (2) · torch 2
+            n = parseInt(m[2] || m[3] || m[4], 10); s = m[1];
+        } else {
+            const w = s.match(/^(a pair of|a couple of|an?|one|two|three|four|five|six|seven|eight|nine|ten|twelve|some|several)\s+(.+)$/i);
+            if (w) { n = INV_NUMBER_WORDS[w[1].toLowerCase().replace(/ /g, "_")] || 1; s = w[2]; }
+        }
+        s = s.replace(/^(?:the|a|an)\s+/i, "").trim();
+        if (!/[a-z]/i.test(s)) continue;
+        if (s.length > INV_NAME_CAP) s = s.slice(0, INV_NAME_CAP).trim();
+        out.push({ name: s, amount: Math.max(1, Math.min(INV_ITEM_CAP, n || 1)) });
+    }
+    return out;
+}
+
+// An existing name for a gained thing, so "silver coins" stacks on "silver
+// coin": exact, then the plural/singular twin. Wallet first (point 4: a gain
+// naming a currency already held lands in the Wallet), then items.
+function INV_gainTarget(name) {
+    const INV = INV_state();
+    const k = String(name).toLowerCase();
+    const twins = [k, k.replace(/es$/, ""), k.replace(/s$/, ""), k + "s", k + "es"];
+    const wallet = Object.keys(INV.wallet);
+    for (let i = 0; i < twins.length; i++) {
+        if (wallet.indexOf(twins[i]) !== -1) return { target: "wallet", name: twins[i] };
+    }
+    for (let i = 0; i < twins.length; i++) {
+        const hit = INV.items.find(it => String(it).toLowerCase() === twins[i]);
+        if (hit) return { target: "items", name: hit };
+    }
+    return { target: "items", name: String(name) };
+}
+
+// Applied at OUTPUT, after GateKit captured the ruling. A retry reverses the
+// previous attempt's gains first (point 6); inventory-command turns ignore
+// the field — the command already did the work (point 5).
+function INV_autoPickup(turn) {
+    const INV = INV_state();
+    if (INV.auto && INV.auto.turn === turn) {
+        const prev = INV.auto.applied || [];
+        for (let i = 0; i < prev.length; i++) {
+            if (prev[i].target === "wallet") INV_walletAdd(prev[i].name, -prev[i].amount);
+            else INV_removeItems(prev[i].name, prev[i].amount);
+        }
+        INV.log = INV.log.filter(op => !(op.auto && op.turn === turn));
+        if (prev.length) INV_renderCard();
+    }
+    INV.auto = null;
+    if (!INV_cfg().AUTO_PICKUP || INV.opTurn === turn) return;
+    let check = null;
+    if (typeof GK_lastCheck === "function") {
+        try { const c = GK_lastCheck(); if (c && c.turn === turn) check = c; } catch (e) {}
+    }
+    if (!check || !check.gain) return;
+    const parsed = INV_parseGain(check.gain);
+    if (!parsed.length) { INV_report("gain not understood: \"" + String(check.gain).slice(0, 80) + "\""); return; }
+    const applied = [];
+    for (let i = 0; i < parsed.length && i < INV_GAIN_MAX; i++) {
+        const t = INV_gainTarget(parsed[i].name);
+        let n = parsed[i].amount;
+        if (t.target === "wallet") INV_walletAdd(t.name, n);
+        else n = INV_add(t.name, n);
+        if (n < 1) continue;
+        applied.push({ target: t.target, name: t.name, amount: n });
+        INV.log.push({ kind: t.target === "wallet" ? "wallet_add" : "add", name: t.name, amount: n, turn: turn, auto: true });
+        if (INV.log.length > INV_UNDO_MAX) INV.log.shift();
+    }
+    if (parsed.length > INV_GAIN_MAX) INV_report("auto pickup: " + (parsed.length - INV_GAIN_MAX) + " more ignored (max " + INV_GAIN_MAX + " a turn)");
+    if (!applied.length) return;
+    INV.auto = { turn: turn, applied: applied };
+    INV_renderCard();
+    const receipt = applied.map(a => a.name + " x" + a.amount + (a.target === "wallet" ? " (wallet)" : "")).join(", ");
+    INV_say("Picked up: " + receipt);
+    INV_report("picked up: " + receipt + " (auto)");
+}
+
 // --- Input pass ------------------------------------------------------------------------
 function INV_onInput(text) {
     const INV = INV_state();
@@ -456,6 +574,9 @@ function INV_onInput(text) {
         if (INV_turn() <= 1) { try { INV_seedKit(INV_cfg()); } catch (e) {} }
     }
     INV_renderCard();
+    if (typeof GK_setArbiterNote === "function") {   // v0.2.8; v0.3.0 picks the note by Auto Pickup
+        try { GK_setArbiterNote("INV", INV_cfg().AUTO_PICKUP ? INV_NOTE_PICKUP : INV_NOTE); } catch (e) {}
+    }
     if (INV_cfg().REPORT && typeof SC_reportEnsure === "function") SC_reportEnsure();
     const t = String(text || "");
     if (typeof RX_command !== "function") return t;   // no Grammar, no commands
@@ -817,6 +938,8 @@ function INV_onOutput(text) {
         }
         INV.pending = null;
     }
+
+    try { INV_autoPickup(turn); } catch (e) {}       // v0.3.0: the ruling's gain= field
 
     // Surface queued player messages, GateKit-brace style
     if (INV.echo.length) {

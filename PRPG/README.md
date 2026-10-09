@@ -39,6 +39,8 @@ A ruling can also carry a cost or a restore (`resource=stamina -8`), which moves
 
 Items and amounts are free text: `/take 3 torches` and `/take torches 3` both work. Item names cap at 40 characters, 99 copies per item.
 
+**Auto Pickup** (on by default): you don't have to `/take` everything. When the story has you take or receive something ("you pocket the coin"), the DM reports it in its ruling and the engine adds it, with a `{Picked up: …}` receipt and an Event Log line. Up to 5 items a turn. Coins go to your Wallet if you already carry that currency. Retrying the turn undoes the previous attempt's pickups, and `/undo` takes back one. Turn it off with `Auto Pickup: false` on Inventory Config, and the DM is told to leave found items where they lie.
+
 ### Possessions (InventoryKit)
 
 | Command | What happens | Judged? |
@@ -87,7 +89,7 @@ Health, Stamina, and Hunger ship on. Mana ships visible but off (`Mana: 0`; set 
 
 ### The world acts (EventKit)
 
-Random intrusions (strangers, weather, discoveries, ambushes) fire on story turns by chance and cooldown. Events Config: `Enabled`, `Chance`, `Cooldown`, per-category `Weights`; 0 disables a category. Every fire is logged, so you always know an event was the engine's doing and not model whimsy.
+Random intrusions (strangers, weather, discoveries, ambushes) fire on story turns by chance and cooldown. Story turns are Do, Say, Story **and Continue**: pressing Continue hands the narration over, and the world may act in the gap. Commands never roll. Events Config: `Enabled`, `Chance`, `Cooldown`, per-category `Weights`; 0 disables a category. Every fire is logged, so you always know an event was the engine's doing and not model whimsy.
 
 | Command | What happens |
 |---|---|
@@ -198,6 +200,6 @@ PRPG consumes only public engine seams:
 
 Thematic event pools register in code with `EV_addPool(category, entries)`; see EventKit's marked extend-here region. If you need something that isn't public, that's an engine design bug worth reporting.
 
-Versioned against **PE Essentials** (RewindKit v0.1.0 · RegexLib v0.1.1 · CardLib v0.4.4 · GateKit v0.10.0 · InventoryKit v0.2.7), with SkillKit v0.4.1 · TrackerKit v0.5.0 · EventKit v0.1.1 · SheetKit v0.1.4 · ObserverKit v0.1.4. The committed bundle is the authoritative artifact: it embeds these exact module versions.
+Versioned against **PE Essentials** (RewindKit v0.1.0 · RegexLib v0.1.1 · CardLib v0.4.4 · GateKit v0.11.0 · InventoryKit v0.3.0), with SkillKit v0.4.1 · TrackerKit v0.5.0 · EventKit v0.1.2 · SheetKit v0.1.4 · ObserverKit v0.1.4. The committed bundle is the authoritative artifact: it embeds these exact module versions.
 
 **Running the tests**: clone the [Paradigm-Engine](https://github.com/Birdlogic-hub/Paradigm-Engine) repo. This folder ships alongside `PE Essentials/`, whose harness and core modules the suites load directly. Then `node test\run.js` to run them all, or `node test\<suite>.test.js` for one. Bundle with `node make-bundle.js`.

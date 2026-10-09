@@ -620,7 +620,29 @@ function SC_report(owner, line, turnNo) {
     return card;
 }
 
-// ===== GateKit v0.10.0 =====
+// ===== GateKit v0.11.0 =====
+// v0.11.0 — the GAIN field (owner ruling 10/9/2026; the Grabby Narrator,
+//  TemporaryCrunch): the verdict line may carry `gain=2 torch, silver coin`
+//  — what the player took or was given this turn. GK_liftGain lifts it off
+//  the line before the dialect regexes run (anywhere on the line, or alone
+//  on the next one; the label is REQUIRED — an unlabeled item list can't
+//  be told from prose), and GK_lastCheck().gain carries the raw value, or
+//  null. GateKit never interprets it: InventoryKit owns the item grammar and
+//  the Auto Pickup toggle, and its note tells the arbiter when to write it.
+// v0.10.1 — the HEADLESS dialect (live-found 10/8/2026, FDE playtest):
+//  "none; difficulty=minor; check=success; resource=none" — the skill's
+//  label shed, every other label kept. A hybrid of skill-first and bare;
+//  the near-miss net caught and stripped it, but the Event Log only said
+//  "no ruling captured" (the UNPARSED line went to GK.log, which the
+//  player can't see). Two turns in three were silent on easy moves. Now
+//  parsed as its own dialect (same s/d/c layout, both modes), and a
+//  near-miss reaches the Event Log verbatim instead of reading as silence.
+//  And the resource label is optional in every skill-first layout (owner,
+//  10/8): "none; minor; success; none" parses as bare. A value that isn't
+//  none or name +/-n is logged UNPARSED and ignored, as before. The gap
+//  before an unlabeled resource (and before its separator) is [ \t]*,
+//  never \s*: \s crosses the
+//  newline and would swallow the story's first line as the resource.
 // v0.10.0 — LUCK IN CODE RESOLUTION (owner rulings 10/7/2026; Documentation/
 //  Design Proposals/Code Resolution - Design Proposal.md §8). Base odds return
 //  to Volta's half rule at 50% for an equal rank (was 70%), and the d20 GateKit
@@ -904,19 +926,23 @@ const GK_PROMPT_CODE = [
 // Load canary: appears in Console Log / Script Test logs on EVERY hook run.
 // If you don't see this line, the Library isn't attached, saved, or executing.
 try {
-    if (GK_cfg().DEBUG_CONSOLE) log("[GateKit] library loaded (v0.10.0)");
+    if (GK_cfg().DEBUG_CONSOLE) log("[GateKit] library loaded (v0.11.0)");
 } catch (e) {}
 
 // Verdict line emitted by the model (v0.7.0 skill-first schema: the model
 // names the skill, then reasons difficulty, then concludes the check —
 // premise before conclusion, now including WHICH premise).
 // Delimiters =/: and separators ;/, accepted — prompt strictly, parse generously.
-const GK_VERDICT_RX = /^\s*skill\s*[=:]\s*([^;\n]+?)\s*[;,]\s*difficulty\s*[=:]\s*(trivial|minor|major|impossible)\s*[;,]\s*check\s*[=:]\s*(success|partial|fail)\s*[;,]?(?:\s*resource\s*[=:]\s*([^;\n]+?)\s*[;,]?)?\s*$/im;
+const GK_VERDICT_RX = /^\s*skill\s*[=:]\s*([^;\n]+?)\s*[;,]\s*difficulty\s*[=:]\s*(trivial|minor|major|impossible)\s*[;,]\s*check\s*[=:]\s*(success|partial|fail)[ \t]*[;,]?(?:[ \t]*(?:resource\s*[=:]\s*)?([^;\n]+?)\s*[;,]?)?\s*$/im;
 
 // v0.8.1 — the BARE dialect (live-found): labels dropped, order kept.
 // "Survival; trivial; success; resource=none;" — same group layout as
 // skill-first, so it maps identically after matching.
-const GK_VERDICT_RX_BARE = /^\s*([a-z][a-z0-9 '\-]{0,40}?)\s*[;,]\s*(trivial|minor|major|impossible)\s*[;,]\s*(success|partial|fail)\s*[;,]?(?:\s*resource\s*[=:]\s*([^;\n]+?)\s*[;,]?)?\s*$/im;
+const GK_VERDICT_RX_BARE = /^\s*([a-z][a-z0-9 '\-]{0,40}?)\s*[;,]\s*(trivial|minor|major|impossible)\s*[;,]\s*(success|partial|fail)[ \t]*[;,]?(?:[ \t]*(?:resource\s*[=:]\s*)?([^;\n]+?)\s*[;,]?)?\s*$/im;
+
+// v0.10.1 — the HEADLESS dialect (live-found): the skill's label shed, the
+// rest labeled. "none; difficulty=minor; check=success; resource=none".
+const GK_VERDICT_RX_HEADLESS = /^\s*([a-z][a-z0-9 '\-]{0,40}?)\s*[;,]\s*difficulty\s*[=:]\s*(trivial|minor|major|impossible)\s*[;,]\s*check\s*[=:]\s*(success|partial|fail)[ \t]*[;,]?(?:[ \t]*(?:resource\s*[=:]\s*)?([^;\n]+?)\s*[;,]?)?\s*$/im;
 
 // v0.4–v0.6 order (difficulty-first, skill optional trailing), still accepted —
 // models echo old context, and skill-less rulings arrive in this shape.
@@ -928,9 +954,11 @@ const GK_VERDICT_RX_LEGACY = /^\s*check\s*[=:]\s*(success|partial|fail)\s*[;,]\s
 // the rank ladder as difficulty (word or 0-7, an echoed "(n)" tolerated).
 // Tried FIRST in code mode only; model mode never sees them.
 const GK_CODE_DIFF = "(trivial|impossible|untrained|novice|apprentice|intermediate|advanced|expert|master|legendary|[0-7])(?:\\s*\\(\\s*[0-7]\\s*\\))?";
-const GK_CODE_TAIL = "\\s*[;,]?(?:\\s*resource\\s*[=:]\\s*([^;\\n]+?)\\s*[;,]?)?\\s*$";
+const GK_CODE_TAIL = "[ \\t]*[;,]?(?:[ \\t]*(?:resource\\s*[=:]\\s*)?([^;\\n]+?)\\s*[;,]?)?\\s*$";   // v0.10.1: label optional
 const GK_VERDICT_RX_CODE = new RegExp("^\\s*skill\\s*[=:]\\s*([^;\\n]+?)\\s*[;,]\\s*difficulty\\s*[=:]\\s*" + GK_CODE_DIFF
     + "\\s*[;,]\\s*check\\s*[=:]\\s*(success|partial|fail)" + GK_CODE_TAIL, "im");
+const GK_VERDICT_RX_CODE_HEADLESS = new RegExp("^\\s*([a-z][a-z0-9 '\\-]{0,40}?)\\s*[;,]\\s*difficulty\\s*[=:]\\s*" + GK_CODE_DIFF
+    + "\\s*[;,]\\s*check\\s*[=:]\\s*(success|partial|fail)" + GK_CODE_TAIL, "im");   // v0.10.1
 const GK_VERDICT_RX_CODE_BARE = new RegExp("^\\s*([a-z][a-z0-9 '\\-]{0,40}?)\\s*[;,]\\s*" + GK_CODE_DIFF
     + "\\s*[;,]\\s*(success|partial|fail)" + GK_CODE_TAIL, "im");
 
@@ -1130,20 +1158,62 @@ function GK_trimRecentStory(ctx, n) {
 
 // --- Output: capture the ruling, hide the scaffolding ----------------------------
 let GK_DEBUG_RAW = null;   // raw model output, captured before any stripping
+let GK_NEAR_MISS = null;   // v0.10.1: this output's unparsed verdict-like line, for the Event Log
+
+// v0.11.0 — the GAIN field. Lifted off the verdict line BEFORE the dialect
+// regexes run, so every dialect keeps parsing untouched and gain may sit
+// anywhere on the line (or alone on the line after it). Returns
+// { out, gain } — gain is the raw value ("2 torch, silver coin"), or null.
+// GateKit only carries it; InventoryKit owns the item grammar.
+const GK_GAIN_RX = /\bgain[ \t]*[=:][ \t]*/i;
+const GK_GAIN_END_RX = /;|[,]?[ \t]*\b(?:resource|skill|difficulty|check)[ \t]*[=:]/i;
+const GK_VERDICT_WORDS_RX = /\b(difficulty|check|trivial|minor|major|impossible|success|partial|fail|untrained|novice|apprentice|intermediate|advanced|expert|master|legendary)\b/i;
+function GK_liftGain(text) {
+    const lines = String(text || "").split("\n");
+    let seen = 0;
+    for (let i = 0; i < lines.length && seen < 3; i++) {
+        const line = lines[i];
+        if (!line.trim()) continue;
+        seen++;
+        const g = line.match(GK_GAIN_RX);
+        if (!g) continue;
+        const before = line.slice(0, g.index);
+        const own = before.trim() === "";
+        if (!own && !GK_VERDICT_WORDS_RX.test(line)) continue;   // prose that says "gain:" is not a field
+        const rest = line.slice(g.index + g[0].length);
+        const e = rest.search(GK_GAIN_END_RX);
+        const value = (e === -1 ? rest : rest.slice(0, e)).replace(/[\s,;.]+$/, "").trim();
+        let after = e === -1 ? "" : rest.slice(e);
+        if (own) {
+            lines[i] = after.replace(/^[\s;,]+/, "");
+            if (!lines[i].trim()) lines.splice(i, 1);
+        } else {
+            lines[i] = before.replace(/[ \t]*[;,]?[ \t]*$/, "") + (after ? (/^[;,]/.test(after) ? "" : "; ") + after : "");
+        }
+        const gain = /^(none|nothing|n\/a|na|null|no|-+)?$/i.test(value) ? null : value;
+        return { out: lines.join("\n"), gain: gain };
+    }
+    return { out: String(text || ""), gain: null };
+}
 
 function GK_onOutput(text) {
     const GK = GK_state();
     let out = String(text || "");
     GK_DEBUG_RAW = out;
+    GK_NEAR_MISS = null;
+    const lifted = GK_liftGain(out);                // v0.11.0
+    out = lifted.out;
 
     const code = GK_codeMode();
     let m = null, dialect = "skillFirst", ranked = false;
     if (code) {                                  // v0.9.0: the rank-ladder dialects first
         m = out.match(GK_VERDICT_RX_CODE);
+        if (!m) { m = out.match(GK_VERDICT_RX_CODE_HEADLESS); if (m) dialect = "headless"; }   // v0.10.1
         if (!m) { m = out.match(GK_VERDICT_RX_CODE_BARE); if (m) dialect = "bare"; }
         ranked = !!m;
     }
     if (!m) { m = out.match(GK_VERDICT_RX); dialect = "skillFirst"; }          // v0.7 skill-first
+    if (!m) { m = out.match(GK_VERDICT_RX_HEADLESS); if (m) dialect = "headless"; }   // v0.10.1: skill label shed
     if (!m) { m = out.match(GK_VERDICT_RX_BARE); if (m) dialect = "bare"; }   // v0.8.1: skill-first group layout
     if (!m) { m = out.match(GK_VERDICT_RX_DFIRST); dialect = "difficultyFirst"; }
     if (!m) { m = out.match(GK_VERDICT_RX_LEGACY); dialect = "legacy"; }
@@ -1156,12 +1226,13 @@ function GK_onOutput(text) {
             && /\b(difficulty|check|skill|resource)\s*[-=:]/i.test(first)
             && /\b(trivial|minor|major|impossible|success|partial|fail|untrained|novice|apprentice|intermediate|advanced|expert|master|legendary)\b/i.test(first)) {
             GK_log("UNPARSED verdict-like line (add to parser): \"" + first.trim() + "\"");
+            GK_NEAR_MISS = first.trim();
             out = out.replace(first, "").replace(/\n{3,}/g, "\n\n").trim();
         }
     }
     if (m) {
         // Per-dialect group mapping: skillFirst/bare = s/d/c, difficultyFirst = d/c/s, legacy = c/d/s
-        const sfLayout = (dialect === "skillFirst" || dialect === "bare");   // bare shares the layout (v0.8.3)
+        const sfLayout = (dialect === "skillFirst" || dialect === "bare" || dialect === "headless");   // bare shares the layout (v0.8.3)
         let result = (sfLayout ? m[3] : dialect === "legacy" ? m[1] : m[2]).toLowerCase();
         let difficulty = (sfLayout ? m[2] : dialect === "legacy" ? m[2] : m[1]).toLowerCase();
         const rawSkill = sfLayout ? m[1] : m[3];
@@ -1210,7 +1281,8 @@ function GK_onOutput(text) {
             skill: skill,
             resource: resource,
             resourceDelta: resourceDelta,
-            luck: GK.luck,                           // v0.10.0: code mode shows the d20 too (it was null)
+            gain: lifted.gain,                       // v0.11.0: raw "2 torch, silver coin" or null; InventoryKit applies it
+            luck: GK.luck,                          // v0.10.0: code mode shows the d20 too (it was null)
             dialect: dialect,                        // parse metadata (v0.8.3, the Observatory's seam)
             raw: m[0].trim().slice(0, 160),          // the verdict line as the model wrote it
             turn: GK_turn(),
@@ -1257,7 +1329,9 @@ function GK_onOutput(text) {
                             + (c.compliant ? "" : " · the table said " + c.expected)
                         : " · luck " + (GK.luck == null ? "-" : GK.luck)));
             } else if (playerTurn) {
-                SC_report("GateKit", "no ruling captured · luck " + (GK.luck == null ? "-" : GK.luck));
+                SC_report("GateKit", (GK_NEAR_MISS
+                    ? "unparsed ruling, stripped: \"" + GK_NEAR_MISS.slice(0, 100) + "\""      // v0.10.1: a near-miss is not silence
+                    : "no ruling captured") + " · luck " + (GK.luck == null ? "-" : GK.luck));
             }
         }
     } catch (e) {}
@@ -1309,7 +1383,29 @@ function GK_onOutputDebug(text) {
 }
 // ========================== END GK DEBUG SECTION ===============================
 
-// ===== InventoryKit v0.2.7 =====
+// ===== InventoryKit v0.3.0 =====
+// v0.3.0 — AUTO PICKUP (owner rulings 10/9/2026, all seven leans; the
+//  Grabby Narrator's real fix): instead of fighting the narrator, record
+//  what it hands over. The ruling's gain= field (GateKit v0.11.0) adds what
+//  the player took or was given. Inventory Config `Auto Pickup: true`
+//  (default) swaps the arbiter note to "add gain= when the player takes or
+//  is given items"; false restores v0.2.8's guard and /take-only pickup.
+//  Gains only — dropping, using and giving stay commands. A gain naming a
+//  currency already in the Wallet lands there. Ignored on inventory-command
+//  turns (no doubles). A retry reverses the previous attempt's gains first;
+//  /undo reverses one gain at a time; Erase is RewindKit's. At most 5 items
+//  a turn, 99 of one, 40-char names. Parsed generously (INV_parseGain).
+//  Receipts: an echo line and the Event Log ("picked up: … (auto)").
+// v0.2.8 — the GRABBY NARRATOR (player report, TemporaryCrunch 10/9/2026,
+//  FDE public test): "You search the crates" → "You pull it free... You
+//  pocket it." The prose took the coin; the ledger never did. STATE IS TRUTH
+//  (the Tonic Incident, mirrored): the model treats a search as including
+//  the take, and nothing in context said how items enter the inventory.
+//  Fix, owner-ruled: a standing arbiter note, owned here and delivered
+//  through GateKit's note seam (GK_setArbiterNote, owner "INV") — found
+//  items stay where they lie unless the player's action takes them. It
+//  narrows the drift, it can't forbid it; automatic pickup (a verdict field)
+//  stays a post-freeze proposal.
 // v0.2.7 — the KIT (player request, TemporaryCrunch 8/29/2026: "is there a way
 //  to pre-plant items into the inventory?"): two config-card lines stock a NEW
 //  adventure on turn 1 — `Starting Items` and `Starting Wallet` — following
@@ -1474,6 +1570,7 @@ const INV_SETTINGS = {
     STARTING_ITEMS: "(none)",      // the Kit (v0.2.7): granted once, on turn 1 only
     STARTING_WALLET: "(none)",     // same, for currencies
     INVENTORY_IN_CONTEXT: true,    // the Standing Ledger (v0.2.4): always-on keys, the arbiter sees holdings
+    AUTO_PICKUP: true,             // v0.3.0: the ruling's gain= field adds what the player took; false = /take only
     REPORT: true                   // post mutations to the "Event Log" card
 };
 
@@ -1481,10 +1578,16 @@ const INV_VERBS = ["take", "collect", "drop", "give", "throw", "use", "swap", "u
 const INV_NAME_CAP = 40;       // max chars for a /take'd item name
 const INV_ITEM_CAP = 99;       // max copies of one item (SIS's cap, kept)
 const INV_UNDO_MAX = 20;       // undo ring buffer depth (SIS's depth, kept)
+// v0.2.8: the arbiter note (GateKit caps notes at 160 chars). v0.3.0: two
+// notes — Auto Pickup on asks for the gain field; off keeps the v0.2.8 guard.
+const INV_NOTE = "Found items stay where they lie unless the player's action takes them. Never narrate the player pocketing or picking up what they did not ask to take.";
+const INV_NOTE_PICKUP = "If the player takes or is given items this turn, add gain= to the verdict line, e.g. gain=2 torch, silver coin. Otherwise leave gain out.";
+const INV_GAIN_MAX = 5;        // v0.3.0: items per auto pickup (a ceiling on what one turn can invent)
+const INV_NUMBER_WORDS = { a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, twelve: 12, a_pair_of: 2, a_couple_of: 2, some: 1, several: 3 };
 
 // Load canary
 try {
-    if (typeof log === "function") log("[InventoryKit] library loaded (v0.2.7)");
+    if (typeof log === "function") log("[InventoryKit] library loaded (v0.3.0)");
 } catch (e) {}
 
 // --- Live settings -----------------------------------------------------------------
@@ -1749,6 +1852,95 @@ function INV_mark() {
 // --- Stub helpers ----------------------------------------------------------------------
 function INV_qty(name, amount) { return amount > 1 ? amount + " " + name : "the " + name; }
 
+// --- Auto Pickup (v0.3.0): the ruling's gain= field --------------------------------------
+// Parse generously: "2 torch", "2x torch", "torch x2", "torch ×2", "torch +2",
+// "torch (2)", "a silver coin", "two torches", comma / "and" / "&" lists.
+// Returns [{ name, amount }] — at most INV_GAIN_MAX, names capped, counts 1..99.
+function INV_parseGain(raw) {
+    const out = [];
+    const segs = String(raw || "").split(/\s*(?:,|&|\band\b|\+(?=\s*[a-z]))\s*/i);
+    for (let i = 0; i < segs.length; i++) {
+        let s = segs[i].replace(/["'“”‘’`]/g, "").replace(/[.\s]+$/, "").trim();
+        if (!s) continue;
+        let n = null;
+        let m = s.match(/^(?:x|×)?\s*(\d+)\s*(?:x|×)?\s+(.+)$/i)                // 2 torch · 2x torch · x2 torch
+            || s.match(/^\+\s*(\d+)\s+(.+)$/);                                      // +2 torch
+        if (m) { n = parseInt(m[1], 10); s = m[2]; }
+        else if ((m = s.match(/^(.+?)\s*(?:(?:x|×|\+)\s*(\d+)|\(\s*(\d+)\s*\)|\s(\d+))$/i))) {   // torch x2 · torch +2 · torch (2) · torch 2
+            n = parseInt(m[2] || m[3] || m[4], 10); s = m[1];
+        } else {
+            const w = s.match(/^(a pair of|a couple of|an?|one|two|three|four|five|six|seven|eight|nine|ten|twelve|some|several)\s+(.+)$/i);
+            if (w) { n = INV_NUMBER_WORDS[w[1].toLowerCase().replace(/ /g, "_")] || 1; s = w[2]; }
+        }
+        s = s.replace(/^(?:the|a|an)\s+/i, "").trim();
+        if (!/[a-z]/i.test(s)) continue;
+        if (s.length > INV_NAME_CAP) s = s.slice(0, INV_NAME_CAP).trim();
+        out.push({ name: s, amount: Math.max(1, Math.min(INV_ITEM_CAP, n || 1)) });
+    }
+    return out;
+}
+
+// An existing name for a gained thing, so "silver coins" stacks on "silver
+// coin": exact, then the plural/singular twin. Wallet first (point 4: a gain
+// naming a currency already held lands in the Wallet), then items.
+function INV_gainTarget(name) {
+    const INV = INV_state();
+    const k = String(name).toLowerCase();
+    const twins = [k, k.replace(/es$/, ""), k.replace(/s$/, ""), k + "s", k + "es"];
+    const wallet = Object.keys(INV.wallet);
+    for (let i = 0; i < twins.length; i++) {
+        if (wallet.indexOf(twins[i]) !== -1) return { target: "wallet", name: twins[i] };
+    }
+    for (let i = 0; i < twins.length; i++) {
+        const hit = INV.items.find(it => String(it).toLowerCase() === twins[i]);
+        if (hit) return { target: "items", name: hit };
+    }
+    return { target: "items", name: String(name) };
+}
+
+// Applied at OUTPUT, after GateKit captured the ruling. A retry reverses the
+// previous attempt's gains first (point 6); inventory-command turns ignore
+// the field — the command already did the work (point 5).
+function INV_autoPickup(turn) {
+    const INV = INV_state();
+    if (INV.auto && INV.auto.turn === turn) {
+        const prev = INV.auto.applied || [];
+        for (let i = 0; i < prev.length; i++) {
+            if (prev[i].target === "wallet") INV_walletAdd(prev[i].name, -prev[i].amount);
+            else INV_removeItems(prev[i].name, prev[i].amount);
+        }
+        INV.log = INV.log.filter(op => !(op.auto && op.turn === turn));
+        if (prev.length) INV_renderCard();
+    }
+    INV.auto = null;
+    if (!INV_cfg().AUTO_PICKUP || INV.opTurn === turn) return;
+    let check = null;
+    if (typeof GK_lastCheck === "function") {
+        try { const c = GK_lastCheck(); if (c && c.turn === turn) check = c; } catch (e) {}
+    }
+    if (!check || !check.gain) return;
+    const parsed = INV_parseGain(check.gain);
+    if (!parsed.length) { INV_report("gain not understood: \"" + String(check.gain).slice(0, 80) + "\""); return; }
+    const applied = [];
+    for (let i = 0; i < parsed.length && i < INV_GAIN_MAX; i++) {
+        const t = INV_gainTarget(parsed[i].name);
+        let n = parsed[i].amount;
+        if (t.target === "wallet") INV_walletAdd(t.name, n);
+        else n = INV_add(t.name, n);
+        if (n < 1) continue;
+        applied.push({ target: t.target, name: t.name, amount: n });
+        INV.log.push({ kind: t.target === "wallet" ? "wallet_add" : "add", name: t.name, amount: n, turn: turn, auto: true });
+        if (INV.log.length > INV_UNDO_MAX) INV.log.shift();
+    }
+    if (parsed.length > INV_GAIN_MAX) INV_report("auto pickup: " + (parsed.length - INV_GAIN_MAX) + " more ignored (max " + INV_GAIN_MAX + " a turn)");
+    if (!applied.length) return;
+    INV.auto = { turn: turn, applied: applied };
+    INV_renderCard();
+    const receipt = applied.map(a => a.name + " x" + a.amount + (a.target === "wallet" ? " (wallet)" : "")).join(", ");
+    INV_say("Picked up: " + receipt);
+    INV_report("picked up: " + receipt + " (auto)");
+}
+
 // --- Input pass ------------------------------------------------------------------------
 function INV_onInput(text) {
     const INV = INV_state();
@@ -1767,6 +1959,9 @@ function INV_onInput(text) {
         if (INV_turn() <= 1) { try { INV_seedKit(INV_cfg()); } catch (e) {} }
     }
     INV_renderCard();
+    if (typeof GK_setArbiterNote === "function") {   // v0.2.8; v0.3.0 picks the note by Auto Pickup
+        try { GK_setArbiterNote("INV", INV_cfg().AUTO_PICKUP ? INV_NOTE_PICKUP : INV_NOTE); } catch (e) {}
+    }
     if (INV_cfg().REPORT && typeof SC_reportEnsure === "function") SC_reportEnsure();
     const t = String(text || "");
     if (typeof RX_command !== "function") return t;   // no Grammar, no commands
@@ -2128,6 +2323,8 @@ function INV_onOutput(text) {
         }
         INV.pending = null;
     }
+
+    try { INV_autoPickup(turn); } catch (e) {}       // v0.3.0: the ruling's gain= field
 
     // Surface queued player messages, GateKit-brace style
     if (INV.echo.length) {

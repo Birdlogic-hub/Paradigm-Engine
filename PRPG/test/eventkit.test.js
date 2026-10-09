@@ -76,9 +76,28 @@ stub = TK_onInput(stub);
 EV_onInput(stub);
 EV_onContext(H.ctx());
 H.assert(state.vars.EV.pending.turn !== 10, "bookkeeping turn (verb stamped via GK seam): no roll");
+// --- the handover (v0.1.2): a Continue rolls, with its own directive ----------------
+state.vars.EV.cooldown = 0;
 H.turn(11, "continue"); H.resetCaches();
+const contCtx = EV_onContext(H.ctx());
+H.assert(state.vars.EV.pending.turn === 11 && state.vars.EV.pending.cont === true, "a Continue rolls (Chance 100)");
+H.assert(/EVENT — this turn the world acts/.test(contCtx) && /Weave it into the story as it continues/.test(contCtx),
+    "a Continue's directive: the event, woven into the story as it continues");
+H.assert(!/action still resolves/.test(contCtx), "a Continue's directive drops the player-action line (nothing to judge)");
+EV_onOutput("The corridor groans.");
+H.assert(state.vars.EV.recent[state.vars.EV.recent.length - 1] === state.vars.EV.pending.id && state.vars.EV.cooldown > 0,
+    "a Continue's event settles like any other: fire line, no-repeat, cooldown armed");
+const cdBefore = state.vars.EV.cooldown;
+H.turn(1100, "continue"); H.resetCaches();
 EV_onContext(H.ctx());
-H.assert(state.vars.EV.pending.turn !== 11, "continue turns are not story turns: no roll");
+H.assert(state.vars.EV.cooldown === cdBefore - 1 && state.vars.EV.pending.turn !== 1100, "a Continue ticks the cooldown and doesn't roll while it runs");
+state.vars.EV.cooldown = 0;
+H.turn(1101, "do"); H.resetCaches();
+const doCtx = EV_onContext(H.ctx());
+H.assert(state.vars.EV.pending.turn === 1101 && !state.vars.EV.pending.cont && /action still resolves/.test(doCtx),
+    "a Do's directive keeps the player-action line");
+EV_onOutput("Onward.");
+state.vars.EV.cooldown = 0;
 
 // --- Selection: weights steer, no-repeat excludes, exhaustion falls through ----------
 cfgCard.entry = cfgCard.entry.replace(/Weights: .*/, "Weights: encounter=0, environment=0, discovery=0, hazard=1, omen=0");

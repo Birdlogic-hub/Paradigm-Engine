@@ -110,6 +110,49 @@ GK_onOutput("Climbing; major; success; resource=stamina -8;\nYou reach the maint
 H.assert(GK_lastCheck().resource === "stamina" && GK_lastCheck().resourceDelta === -8, "bare dialect carries the resource field");
 H.assert(GK_lastCheck().dialect === "bare", "the bare dialect NAMES itself (v0.8.3 — it reported skillFirst since v0.8.1)");
 
+// --- v0.10.1: the headless dialect — the live leaks, verbatim (rule 9) --------------
+H.turn(132, "do"); H.resetCaches();
+GK_onInput(H.doFrame("You follow the path carefully."));
+GK_onContext(H.ctx());
+let headOut = GK_onOutput("none; difficulty=minor; check=success; resource=none\nThe clicking grows more distinct as you follow the path.");
+let hc = GK_lastCheck();
+H.assert(hc.turn === 132 && hc.dialect === "headless" && hc.skill === null && hc.difficulty === "minor" && hc.result === "success" && hc.resource === null,
+    "headless dialect parses (skill label shed, the rest kept); 'none' is no skill");
+H.assert(/^The clicking/.test(headOut) && headOut.indexOf("difficulty") === -1, "headless verdict stripped from the story");
+H.turn(133, "do"); H.resetCaches();
+GK_onInput(H.doFrame("You focus on the sound."));
+GK_onContext(H.ctx());
+GK_onOutput("None; difficulty=minor; check=success; resource=stamina -4\nThe clicking grows louder.");
+hc = GK_lastCheck();
+H.assert(hc.turn === 133 && hc.dialect === "headless" && hc.resource === "stamina" && hc.resourceDelta === -4, "headless carries the resource field");
+H.turn(134, "do"); H.resetCaches();
+GK_onInput(H.doFrame("You climb the ledge."));
+GK_onContext(H.ctx());
+GK_onOutput("Climbing; difficulty=major; check=fail; resource=none\nYou slip back.");
+H.assert(GK_lastCheck().turn === 134 && GK_lastCheck().skill === "climbing" && GK_lastCheck().result === "fail", "headless with a named skill");
+H.turn(135, "do"); H.resetCaches();
+GK_onInput(H.doFrame("You look around."));
+GK_onContext(H.ctx());
+let allBare = GK_onOutput("none; minor; success; none" + "\n" + "The chamber is quiet.");
+H.assert(GK_lastCheck().turn === 135 && GK_lastCheck().dialect === "bare" && GK_lastCheck().resource === null && /^The chamber/.test(allBare),
+    "fully bare, resource label shed too: 'none; minor; success; none' (owner, 10/8)");
+H.turn(136, "do"); H.resetCaches();
+GK_onInput(H.doFrame("You sprint."));
+GK_onContext(H.ctx());
+GK_onOutput("Athletics; major; success; stamina -6" + "\n" + "You make the gap.");
+H.assert(GK_lastCheck().resource === "stamina" && GK_lastCheck().resourceDelta === -6, "an unlabeled resource still carries its delta");
+H.turn(137, "do"); H.resetCaches();
+GK_onInput(H.doFrame("You wait."));
+GK_onContext(H.ctx());
+let keepFirst = GK_onOutput("skill=none; difficulty=trivial; check=success" + "\n" + "Ok.");
+H.assert(GK_lastCheck().turn === 137 && GK_lastCheck().resource === null && keepFirst === "Ok.",
+    "no trailing ';': the story's first line is never read as an unlabeled resource");
+H.turn(138, "do"); H.resetCaches();
+GK_onInput(H.doFrame("You wait."));
+GK_onContext(H.ctx());
+keepFirst = GK_onOutput("Waiting; trivial; success" + "\n" + "Ok.");
+H.assert(GK_lastCheck().turn === 138 && keepFirst === "Ok.", "same for the bare dialect");
+
 // --- v0.9.0: code resolution (owner rulings 9/25); v0.10.0: 50% base + luck (10/7) ----
 const near = (a, b) => Math.abs(a - b) < 1e-9;
 H.assert(near(GK_chance(3, 3), 0.5) && near(GK_chance(2, 3), 0.25) && near(GK_chance(1, 3), 0.125) && near(GK_chance(0, 3), 0.0625)
@@ -132,6 +175,8 @@ global.logLines.length = 0;
 out = GK_onOutput("skill=climbing; difficulty=novice; check=fail;\nYou slip.");
 H.assert(GK_lastCheck().turn !== 140 && /^You slip\./.test(out) && logLines.some(l => /UNPARSED/.test(l)),
     "model mode: a rank-ladder verdict is stripped and logged, never parsed");
+H.assert(/^T140 \[GateKit\] unparsed ruling, stripped: "skill=climbing; difficulty=novice; check=fail;" · luck \d+$/m.test(SC_get("Event Log").entry),
+    "a near-miss reaches the Event Log verbatim, not as 'no ruling captured' (v0.10.1)");
 
 H.assert(GK_resolution() === "model", "GK_resolution() reads model by default (v0.9.1)");
 SC_get("GateKit Config").entry = SC_get("GateKit Config").entry.replace("Resolution: model", "Resolution: code");
@@ -204,6 +249,18 @@ GK_onOutput("Climbing; apprentice; success; resource=stamina -4;\nYou make it.")
 cc = GK_lastCheck();
 H.assert(cc.dialect === "bare" && cc.difficultyRank === "apprentice" && cc.compliant === true && cc.resourceDelta === -4,
     "bare dialect on the ladder (10 < 12.5: success) keeps its resource field");
+codeTurn(1621, "You follow the path", 10);
+GK_onOutput("none; difficulty=apprentice; check=success; resource=none\nYou follow it.");
+cc = GK_lastCheck();
+H.assert(cc.turn === 1621 && cc.dialect === "headless" && cc.resolution === "code" && cc.difficultyRank === "apprentice" && cc.skill === null,
+    "headless dialect on the ladder (v0.10.1)");
+codeTurn(1622, "You grab the rope", 10);
+let gOut = GK_onOutput("skill=climbing; difficulty=apprentice; check=success; resource=none; gain=coil of rope\nYou take it.");
+H.assert(GK_lastCheck().turn === 1622 && GK_lastCheck().difficultyRank === "apprentice" && GK_lastCheck().gain === "coil of rope" && gOut === "You take it.",
+    "gain= lifts off a code-mode verdict; the ruling parses as before (v0.11.0)");
+codeTurn(1623, "You look", 10);
+GK_onOutput("skill=none; difficulty=trivial; check=success; resource=none\nNothing.");
+H.assert(GK_lastCheck().gain === null, "no gain field: gain is null");
 codeTurn(163, "You climb", 5);
 GK_onOutput("skill=climbing; difficulty=3 (3); check=success;\nUp.");
 H.assert(GK_lastCheck().difficultyRank === "intermediate" && GK_lastCheck().compliant === true, "digit difficulty, echoed (n) tolerated");

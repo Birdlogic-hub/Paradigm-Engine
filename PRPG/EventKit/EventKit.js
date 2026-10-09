@@ -1,4 +1,11 @@
-// ===== EventKit v0.1.1 =====
+// ===== EventKit v0.1.2 =====
+// v0.1.2 — the HANDOVER (owner ruling 10/8/2026): a Continue rolls too.
+//  A Continue is the player handing the narration over — the most natural
+//  moment for the world to act. It rolls and ticks the cooldown like any
+//  story turn; its directive drops "the player's action still resolves"
+//  (there is no action — GateKit never adjudicates a Continue, so the
+//  event block is the only block). At context time a Continue's history
+//  tail is the AI's previous output, type "continue".
 // v0.1.1 — the SILENT SIXTY-FIVE (live-found 7/21/2026: 65 story turns,
 //  zero fires — P(luck) ~0.1%). The cadence roll lived in the INPUT pass
 //  and asked history whether this was a story turn; during AID's input
@@ -45,7 +52,7 @@ const EV_SETTINGS = {
     REPORT: true
 };
 
-if (typeof log === "function") log("[EventKit] library loaded (v0.1.1)");
+if (typeof log === "function") log("[EventKit] library loaded (v0.1.2)");
 
 // --- Layer 1: generic presets — fiction only, never mechanics ------------------------
 const EV_POOLS = {
@@ -245,10 +252,11 @@ function EV_onContext(text) {
 
         if (EV.rollTurn !== turn) {
             EV.rollTurn = turn;
-            let story = false;
+            let story = false, cont = false;
             try {
                 const last = history && history[history.length - 1];
-                story = !!last && ["do", "say", "story"].indexOf(last.type) !== -1;
+                cont = !!last && last.type === "continue";          // v0.1.2: the handover
+                story = cont || (!!last && ["do", "say", "story"].indexOf(last.type) !== -1);
             } catch (e) {}
             if (story && !EV_isBookkeeping("")) {
                 if (EV.cooldown > 0) { EV.cooldown--; }    // weather, not a metronome
@@ -256,7 +264,7 @@ function EV_onContext(text) {
                     const chance = Math.max(0, Math.min(100, Math.round(Number(cfg.CHANCE)) || 0));
                     if (Math.random() * 100 < chance) {
                         const pick = EV_pick(cfg, null);
-                        if (pick) EV.pending = { id: pick.id, cat: pick.cat, text: pick.text, fx: pick.fx, turn: turn };
+                        if (pick) EV.pending = { id: pick.id, cat: pick.cat, text: pick.text, fx: pick.fx, turn: turn, cont: cont };
                     }
                 }
             }
@@ -264,7 +272,9 @@ function EV_onContext(text) {
 
         if (!EV.pending || EV.pending.turn !== turn) return ctx;
         const block = "<SYSTEM>\nEVENT — this turn the world acts: " + EV.pending.text + ".\n"
-            + "Weave it into your narration naturally. The player's action still resolves and is judged as usual.\n</SYSTEM>";
+            + (EV.pending.cont
+                ? "Weave it into the story as it continues.\n</SYSTEM>"
+                : "Weave it into your narration naturally. The player's action still resolves and is judged as usual.\n</SYSTEM>");
         return (ctx ? ctx + "\n\n" : "") + block;
     } catch (e) { return String(text || ""); }
 }

@@ -1,4 +1,26 @@
-// ===== GateKit v0.10.0 =====
+// ===== GateKit v0.11.0 =====
+// v0.11.0 — the GAIN field (owner ruling 10/9/2026; the Grabby Narrator,
+//  TemporaryCrunch): the verdict line may carry `gain=2 torch, silver coin`
+//  — what the player took or was given this turn. GK_liftGain lifts it off
+//  the line before the dialect regexes run (anywhere on the line, or alone
+//  on the next one; the label is REQUIRED — an unlabeled item list can't
+//  be told from prose), and GK_lastCheck().gain carries the raw value, or
+//  null. GateKit never interprets it: InventoryKit owns the item grammar and
+//  the Auto Pickup toggle, and its note tells the arbiter when to write it.
+// v0.10.1 — the HEADLESS dialect (live-found 10/8/2026, FDE playtest):
+//  "none; difficulty=minor; check=success; resource=none" — the skill's
+//  label shed, every other label kept. A hybrid of skill-first and bare;
+//  the near-miss net caught and stripped it, but the Event Log only said
+//  "no ruling captured" (the UNPARSED line went to GK.log, which the
+//  player can't see). Two turns in three were silent on easy moves. Now
+//  parsed as its own dialect (same s/d/c layout, both modes), and a
+//  near-miss reaches the Event Log verbatim instead of reading as silence.
+//  And the resource label is optional in every skill-first layout (owner,
+//  10/8): "none; minor; success; none" parses as bare. A value that isn't
+//  none or name +/-n is logged UNPARSED and ignored, as before. The gap
+//  before an unlabeled resource (and before its separator) is [ \t]*,
+//  never \s*: \s crosses the
+//  newline and would swallow the story's first line as the resource.
 // v0.10.0 — LUCK IN CODE RESOLUTION (owner rulings 10/7/2026; Documentation/
 //  Design Proposals/Code Resolution - Design Proposal.md §8). Base odds return
 //  to Volta's half rule at 50% for an equal rank (was 70%), and the d20 GateKit
@@ -282,19 +304,23 @@ const GK_PROMPT_CODE = [
 // Load canary: appears in Console Log / Script Test logs on EVERY hook run.
 // If you don't see this line, the Library isn't attached, saved, or executing.
 try {
-    if (GK_cfg().DEBUG_CONSOLE) log("[GateKit] library loaded (v0.10.0)");
+    if (GK_cfg().DEBUG_CONSOLE) log("[GateKit] library loaded (v0.11.0)");
 } catch (e) {}
 
 // Verdict line emitted by the model (v0.7.0 skill-first schema: the model
 // names the skill, then reasons difficulty, then concludes the check —
 // premise before conclusion, now including WHICH premise).
 // Delimiters =/: and separators ;/, accepted — prompt strictly, parse generously.
-const GK_VERDICT_RX = /^\s*skill\s*[=:]\s*([^;\n]+?)\s*[;,]\s*difficulty\s*[=:]\s*(trivial|minor|major|impossible)\s*[;,]\s*check\s*[=:]\s*(success|partial|fail)\s*[;,]?(?:\s*resource\s*[=:]\s*([^;\n]+?)\s*[;,]?)?\s*$/im;
+const GK_VERDICT_RX = /^\s*skill\s*[=:]\s*([^;\n]+?)\s*[;,]\s*difficulty\s*[=:]\s*(trivial|minor|major|impossible)\s*[;,]\s*check\s*[=:]\s*(success|partial|fail)[ \t]*[;,]?(?:[ \t]*(?:resource\s*[=:]\s*)?([^;\n]+?)\s*[;,]?)?\s*$/im;
 
 // v0.8.1 — the BARE dialect (live-found): labels dropped, order kept.
 // "Survival; trivial; success; resource=none;" — same group layout as
 // skill-first, so it maps identically after matching.
-const GK_VERDICT_RX_BARE = /^\s*([a-z][a-z0-9 '\-]{0,40}?)\s*[;,]\s*(trivial|minor|major|impossible)\s*[;,]\s*(success|partial|fail)\s*[;,]?(?:\s*resource\s*[=:]\s*([^;\n]+?)\s*[;,]?)?\s*$/im;
+const GK_VERDICT_RX_BARE = /^\s*([a-z][a-z0-9 '\-]{0,40}?)\s*[;,]\s*(trivial|minor|major|impossible)\s*[;,]\s*(success|partial|fail)[ \t]*[;,]?(?:[ \t]*(?:resource\s*[=:]\s*)?([^;\n]+?)\s*[;,]?)?\s*$/im;
+
+// v0.10.1 — the HEADLESS dialect (live-found): the skill's label shed, the
+// rest labeled. "none; difficulty=minor; check=success; resource=none".
+const GK_VERDICT_RX_HEADLESS = /^\s*([a-z][a-z0-9 '\-]{0,40}?)\s*[;,]\s*difficulty\s*[=:]\s*(trivial|minor|major|impossible)\s*[;,]\s*check\s*[=:]\s*(success|partial|fail)[ \t]*[;,]?(?:[ \t]*(?:resource\s*[=:]\s*)?([^;\n]+?)\s*[;,]?)?\s*$/im;
 
 // v0.4–v0.6 order (difficulty-first, skill optional trailing), still accepted —
 // models echo old context, and skill-less rulings arrive in this shape.
@@ -306,9 +332,11 @@ const GK_VERDICT_RX_LEGACY = /^\s*check\s*[=:]\s*(success|partial|fail)\s*[;,]\s
 // the rank ladder as difficulty (word or 0-7, an echoed "(n)" tolerated).
 // Tried FIRST in code mode only; model mode never sees them.
 const GK_CODE_DIFF = "(trivial|impossible|untrained|novice|apprentice|intermediate|advanced|expert|master|legendary|[0-7])(?:\\s*\\(\\s*[0-7]\\s*\\))?";
-const GK_CODE_TAIL = "\\s*[;,]?(?:\\s*resource\\s*[=:]\\s*([^;\\n]+?)\\s*[;,]?)?\\s*$";
+const GK_CODE_TAIL = "[ \\t]*[;,]?(?:[ \\t]*(?:resource\\s*[=:]\\s*)?([^;\\n]+?)\\s*[;,]?)?\\s*$";   // v0.10.1: label optional
 const GK_VERDICT_RX_CODE = new RegExp("^\\s*skill\\s*[=:]\\s*([^;\\n]+?)\\s*[;,]\\s*difficulty\\s*[=:]\\s*" + GK_CODE_DIFF
     + "\\s*[;,]\\s*check\\s*[=:]\\s*(success|partial|fail)" + GK_CODE_TAIL, "im");
+const GK_VERDICT_RX_CODE_HEADLESS = new RegExp("^\\s*([a-z][a-z0-9 '\\-]{0,40}?)\\s*[;,]\\s*difficulty\\s*[=:]\\s*" + GK_CODE_DIFF
+    + "\\s*[;,]\\s*check\\s*[=:]\\s*(success|partial|fail)" + GK_CODE_TAIL, "im");   // v0.10.1
 const GK_VERDICT_RX_CODE_BARE = new RegExp("^\\s*([a-z][a-z0-9 '\\-]{0,40}?)\\s*[;,]\\s*" + GK_CODE_DIFF
     + "\\s*[;,]\\s*(success|partial|fail)" + GK_CODE_TAIL, "im");
 
@@ -508,20 +536,62 @@ function GK_trimRecentStory(ctx, n) {
 
 // --- Output: capture the ruling, hide the scaffolding ----------------------------
 let GK_DEBUG_RAW = null;   // raw model output, captured before any stripping
+let GK_NEAR_MISS = null;   // v0.10.1: this output's unparsed verdict-like line, for the Event Log
+
+// v0.11.0 — the GAIN field. Lifted off the verdict line BEFORE the dialect
+// regexes run, so every dialect keeps parsing untouched and gain may sit
+// anywhere on the line (or alone on the line after it). Returns
+// { out, gain } — gain is the raw value ("2 torch, silver coin"), or null.
+// GateKit only carries it; InventoryKit owns the item grammar.
+const GK_GAIN_RX = /\bgain[ \t]*[=:][ \t]*/i;
+const GK_GAIN_END_RX = /;|[,]?[ \t]*\b(?:resource|skill|difficulty|check)[ \t]*[=:]/i;
+const GK_VERDICT_WORDS_RX = /\b(difficulty|check|trivial|minor|major|impossible|success|partial|fail|untrained|novice|apprentice|intermediate|advanced|expert|master|legendary)\b/i;
+function GK_liftGain(text) {
+    const lines = String(text || "").split("\n");
+    let seen = 0;
+    for (let i = 0; i < lines.length && seen < 3; i++) {
+        const line = lines[i];
+        if (!line.trim()) continue;
+        seen++;
+        const g = line.match(GK_GAIN_RX);
+        if (!g) continue;
+        const before = line.slice(0, g.index);
+        const own = before.trim() === "";
+        if (!own && !GK_VERDICT_WORDS_RX.test(line)) continue;   // prose that says "gain:" is not a field
+        const rest = line.slice(g.index + g[0].length);
+        const e = rest.search(GK_GAIN_END_RX);
+        const value = (e === -1 ? rest : rest.slice(0, e)).replace(/[\s,;.]+$/, "").trim();
+        let after = e === -1 ? "" : rest.slice(e);
+        if (own) {
+            lines[i] = after.replace(/^[\s;,]+/, "");
+            if (!lines[i].trim()) lines.splice(i, 1);
+        } else {
+            lines[i] = before.replace(/[ \t]*[;,]?[ \t]*$/, "") + (after ? (/^[;,]/.test(after) ? "" : "; ") + after : "");
+        }
+        const gain = /^(none|nothing|n\/a|na|null|no|-+)?$/i.test(value) ? null : value;
+        return { out: lines.join("\n"), gain: gain };
+    }
+    return { out: String(text || ""), gain: null };
+}
 
 function GK_onOutput(text) {
     const GK = GK_state();
     let out = String(text || "");
     GK_DEBUG_RAW = out;
+    GK_NEAR_MISS = null;
+    const lifted = GK_liftGain(out);                // v0.11.0
+    out = lifted.out;
 
     const code = GK_codeMode();
     let m = null, dialect = "skillFirst", ranked = false;
     if (code) {                                  // v0.9.0: the rank-ladder dialects first
         m = out.match(GK_VERDICT_RX_CODE);
+        if (!m) { m = out.match(GK_VERDICT_RX_CODE_HEADLESS); if (m) dialect = "headless"; }   // v0.10.1
         if (!m) { m = out.match(GK_VERDICT_RX_CODE_BARE); if (m) dialect = "bare"; }
         ranked = !!m;
     }
     if (!m) { m = out.match(GK_VERDICT_RX); dialect = "skillFirst"; }          // v0.7 skill-first
+    if (!m) { m = out.match(GK_VERDICT_RX_HEADLESS); if (m) dialect = "headless"; }   // v0.10.1: skill label shed
     if (!m) { m = out.match(GK_VERDICT_RX_BARE); if (m) dialect = "bare"; }   // v0.8.1: skill-first group layout
     if (!m) { m = out.match(GK_VERDICT_RX_DFIRST); dialect = "difficultyFirst"; }
     if (!m) { m = out.match(GK_VERDICT_RX_LEGACY); dialect = "legacy"; }
@@ -534,12 +604,13 @@ function GK_onOutput(text) {
             && /\b(difficulty|check|skill|resource)\s*[-=:]/i.test(first)
             && /\b(trivial|minor|major|impossible|success|partial|fail|untrained|novice|apprentice|intermediate|advanced|expert|master|legendary)\b/i.test(first)) {
             GK_log("UNPARSED verdict-like line (add to parser): \"" + first.trim() + "\"");
+            GK_NEAR_MISS = first.trim();
             out = out.replace(first, "").replace(/\n{3,}/g, "\n\n").trim();
         }
     }
     if (m) {
         // Per-dialect group mapping: skillFirst/bare = s/d/c, difficultyFirst = d/c/s, legacy = c/d/s
-        const sfLayout = (dialect === "skillFirst" || dialect === "bare");   // bare shares the layout (v0.8.3)
+        const sfLayout = (dialect === "skillFirst" || dialect === "bare" || dialect === "headless");   // bare shares the layout (v0.8.3)
         let result = (sfLayout ? m[3] : dialect === "legacy" ? m[1] : m[2]).toLowerCase();
         let difficulty = (sfLayout ? m[2] : dialect === "legacy" ? m[2] : m[1]).toLowerCase();
         const rawSkill = sfLayout ? m[1] : m[3];
@@ -588,7 +659,8 @@ function GK_onOutput(text) {
             skill: skill,
             resource: resource,
             resourceDelta: resourceDelta,
-            luck: GK.luck,                           // v0.10.0: code mode shows the d20 too (it was null)
+            gain: lifted.gain,                       // v0.11.0: raw "2 torch, silver coin" or null; InventoryKit applies it
+            luck: GK.luck,                          // v0.10.0: code mode shows the d20 too (it was null)
             dialect: dialect,                        // parse metadata (v0.8.3, the Observatory's seam)
             raw: m[0].trim().slice(0, 160),          // the verdict line as the model wrote it
             turn: GK_turn(),
@@ -635,7 +707,9 @@ function GK_onOutput(text) {
                             + (c.compliant ? "" : " · the table said " + c.expected)
                         : " · luck " + (GK.luck == null ? "-" : GK.luck)));
             } else if (playerTurn) {
-                SC_report("GateKit", "no ruling captured · luck " + (GK.luck == null ? "-" : GK.luck));
+                SC_report("GateKit", (GK_NEAR_MISS
+                    ? "unparsed ruling, stripped: \"" + GK_NEAR_MISS.slice(0, 100) + "\""      // v0.10.1: a near-miss is not silence
+                    : "no ruling captured") + " · luck " + (GK.luck == null ? "-" : GK.luck));
             }
         }
     } catch (e) {}

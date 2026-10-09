@@ -1,4 +1,8 @@
-# GateKit v0.10.0 — the Check primitive
+# GateKit v0.11.0 — the Check primitive
+
+**v0.11.0** adds an optional `gain=` field to the verdict line: what the player took or was given this turn. GateKit lifts it off the line and carries it on `GK_lastCheck().gain`; InventoryKit applies it.
+
+**v0.10.1** parses a live-found ruling shape — **the headless dialect:** `none; difficulty=minor; check=success; resource=none` (the skill's label shed, the rest kept) now parses, in both modes. The resource label is optional too (owner): `none; minor; success; none` parses as bare. A near-miss reaches the Event Log verbatim (`unparsed ruling, stripped: "…"`) instead of reading as "no ruling captured".
 
 **v0.10.0** brings luck into code resolution: Volta's 50% base for an equal rank, plus the d20 as ±18 points of luck, shown to the arbiter and counted in the table.
 
